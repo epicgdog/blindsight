@@ -32,7 +32,7 @@ def test_required_panels_present():
 
 
 def test_node_logic_unit():
-    r = subprocess.run(["node", "--test", "server/viewer/test"], cwd=ROOT,
+    r = subprocess.run(["node", "--test", "server/viewer/test/*.test.js"], cwd=ROOT,
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
 
