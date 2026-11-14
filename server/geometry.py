@@ -404,6 +404,11 @@ class Verification:
     ms: float = 0.0
     live_pts: np.ndarray | None = field(default=None, repr=False)
     ref_pts: np.ndarray | None = field(default=None, repr=False)
+    # Every putative match (before RANSAC). The rotation-consistent inliers above drop exactly the
+    # parallax that position estimation needs, so PnP starts from these instead.
+    match_live_pts: np.ndarray | None = field(default=None, repr=False)
+    match_ref_pts: np.ndarray | None = field(default=None, repr=False)
+    match_ref_idx: np.ndarray | None = field(default=None, repr=False)  # ref keypoint index per match
 
     def passes(self, n_min: int, grid_cells_min: int) -> bool:
         return self.inliers >= n_min and self.grid_cells >= grid_cells_min
@@ -441,6 +446,7 @@ def verify(
         return v
     p_live = live.kpts[qi].astype(np.float64)
     p_ref = ref.kpts[ti].astype(np.float64)
+    v.match_live_pts, v.match_ref_pts, v.match_ref_idx = p_live, p_ref, np.asarray(ti)
     H, mask = cv2.findHomography(
         p_ref, p_live, cv2.RANSAC, ransac_px, maxIters=2000, confidence=0.999
     )

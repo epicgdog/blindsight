@@ -82,6 +82,7 @@ One WebSocket message per frame:
 ```
 
 Header keys: `seq`, `ts_ms` (client send time), `heading_deg` (compass degrees or `null`), `w`, `h`.
+Optional keys (older phones omit them): `pitch_deg` (camera pitch from the accelerometer, + looks up, within +/-90), `roll_deg` (within +/-180), `moving` (`true` while the user is walking, `false` when still).
 
 ### Server to phone and viewer (JSON text)
 
@@ -173,6 +174,22 @@ The phone app is verified to bundle (`npx expo export --platform ios`) but has n
 | `tools/render_backup_video.py` | simulated-feed backup video |
 | `tests/part2/` | Python integration tests |
 | `NOTES-part2.md` | assumptions, open items, measured numbers |
+
+## Localization: IMU, metric position, tracking
+
+Added on top of the multi-place localizer (`server/localize.py`).
+
+**IMU pitch gate.** The phone derives camera pitch and roll from gravity (`app/src/attitude.js`, expo-sensors) and sends them in every frame header. A verified match whose pitch differs from the phone's by more than `P3_PITCH_GATE_DEG` (15) is rejected (`last_debug["imu_rejected"]`). `tools/eval_pitch_gate.py` runs the 40 synthetic test walkthroughs with and without it: identical results on simulated data (40/40 locked on the right place, 0 wrong frames, the gate never fired), so its benefit still has to be shown on site.
+
+**Metric position (depth + PnP).** `server/position.py` ray casts the matched reference keypoints into the scan mesh and solves `cv2.solvePnPRansac`, giving the camera centre instead of only "at scan point X". The pano-to-mesh rotation was not documented; `tools/calibrate_pano_frame.py` tests 24 candidate frames with cross-pano PnP on 25 real pano pairs and writes the winner to `data/matterport/pano_frame.json` (median error 0.14 m, runner-up 2.4 m). Casts are cached per reference keypoint and run on a worker thread, so frames never wait for the mesh. The result is in the viewer payload as `match.position` (mesh x, y, z, offset from the pano, inliers). Procedural-room tests: within about 1 cm up to 2.2 m from the scan point. `P3_POSITION=0` turns it off.
+
+**Still-phone hold.** The phone flags walking from the spread of the accelerometer magnitude over 1.5 s (turning on the spot counts as still) and sends `moving`; the status line shows `walking` / `still`. While still, the reported place cannot switch. Thresholds are not yet tuned on a real phone.
+
+**"Where on the pano" panel.** Shows the pano of the highest-confidence view of each frame (the verified candidate with the most inliers, `match.pano`) and draws the footprint from that view, so picture and outline always agree.
+
+**Kalman tracker.** `server/tracker.py` tracks the user on the floor plan (constant-velocity filter on x, y; height from the last accepted fix). Every verified match is a measurement: the PnP fix (sigma from inliers and offset) or, without one, the matched scan point (sigma 1 m). Process noise follows the walking flag, so standing still averages fixes and walking follows at normal speeds. A match more than the 99% chi-square bound from the track, or on another floor, is rejected; if it is for a different place it does not count as matched, which stops jumps to far-away scan points. Three rejected fixes in a row that agree within 1 m restart the track there (only while walking, so a repeated look-alike seen while standing cannot win). `match.position` now carries the tracked point, its sigma, the source (`pnp`, `scan_point`, `track`) and the raw fix.
+
+Evaluation scripts (simulated data unless noted): `tools/eval_pitch_gate.py`, `tools/eval_position.py`, `tools/calibrate_pano_frame.py` (real pano pairs).
 
 ## Status and limits
 

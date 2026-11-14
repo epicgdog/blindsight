@@ -36,6 +36,26 @@
       <h2>Cues</h2>
       <ol id="cue-log"></ol>
     </section>
+    <section class="panel" id="rank-panel">
+      <h2>Closest places</h2>
+      <div id="compare">
+        <figure><img id="cmp-live" alt="received frame"><figcaption>Received</figcaption></figure>
+        <figure><img id="cmp-top" alt="best matching place"><figcaption id="cmp-top-name">Best match</figcaption></figure>
+      </div>
+      <ol id="rank-list"></ol>
+    </section>
+    <section class="panel" id="map-panel">
+      <h2>Where on the pano</h2>
+      <div id="pano-map">
+        <img id="equirect" alt="pano panorama">
+        <svg id="footprint" viewBox="0 0 2048 1024" preserveAspectRatio="none" aria-label="where the frame sits on the pano"></svg>
+      </div>
+    </section>
+    <section class="panel" id="mini-panel">
+      <h2>Where you are <span id="mm-floor"></span></h2>
+      <svg id="minimap" viewBox="0 0 400 400" aria-label="top view of the scan points"></svg>
+      <div id="mm-place"></div>
+    </section>
     <section class="panel" id="capture-panel">
       <button id="btn-pos">Save as positive</button>
       <button id="btn-neg">Save as negative</button>

@@ -50,6 +50,10 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from localization_debug import localization_reason  # noqa: E402
+from matchviz import footprint_polygon, rank_places  # noqa: E402
+from position import PositionSolver  # noqa: E402
+from tracker import SCAN_POINT_SIGMA_M, Measurement, PositionTracker, fix_sigma  # noqa: E402
+from refmask import compute_masks, mask_key, region_polygons  # noqa: E402
 from geometry import (  # noqa: E402
     Features,
     ang_diff,
@@ -113,6 +117,19 @@ TOPK_DEMO = 3  # global-retrieval proposals from the locked pano (doc: top 3)
 TOPK_DEMO_BOW = 2  # extra proposals from the local-feature vocabulary
 TOPK_COMP = 3  # proposals from competing scan points (vocabulary)
 MAX_COMPETITORS = int(os.environ.get("P3_MAX_COMPETITORS", "20"))
+# Multi-place mode (every pano is a candidate place): a new place must beat the best other place by
+# this inlier ratio, and be seen on this many consecutive frames, before the reported place moves.
+MULTI_MARGIN = float(os.environ.get("P3_MULTI_MARGIN", "1.15"))
+SWITCH_FRAMES = int(os.environ.get("P3_SWITCH_FRAMES", "2"))
+# IMU gate: a verified match whose pitch disagrees with the phone accelerometer by more than this
+# many degrees is not trusted (gravity gives pitch to a few degrees; vision can lock onto look-alikes).
+PITCH_GATE_DEG = float(os.environ.get("P3_PITCH_GATE_DEG", "15"))
+# Metric position (depth from the scan mesh + PnP) for a verified match. Needs
+# data/matterport/pano_frame.json (tools/calibrate_pano_frame.py). P3_POSITION=0 turns it off.
+POSITION_ON = os.environ.get("P3_POSITION", "1") != "0"
+# Phone reports it is not walking (accelerometer): the user is on the same spot, so the
+# place may not switch. Position is tracked by a Kalman filter (tracker.py) whose motion
+# noise follows the walking flag; it also rejects matches implausibly far from the track.
 MAX_ONSITE_NEG = 200  # frames from Part 1's POST /api/capture/neg used as competing views
 ONSITE_NEG = "onsite_negatives"  # place name for those frames
 COMP_YAWS = tuple(range(0, 360, 15))  # competitor views: every 15 degrees at pitch 0
@@ -237,6 +254,14 @@ class Dinov2Embedder:
         return np.concatenate(out).astype(np.float32)
 
 
+class Dinov2BaseEmbedder(Dinov2Embedder):
+    """DINOv2-base (768 hidden, 1536-d vector): same pooling and 224 px input as small,
+    about 2.8x the compute (~25 ms per frame on Apple MPS)."""
+
+    name = "dinov2-base"
+    MODEL_ID = "facebook/dinov2-base"
+
+
 class OpenClipEmbedder:
     """open_clip ViT-B-32 image embedding (documented retrieval fallback)."""
 
@@ -293,9 +318,10 @@ class ClassicEmbedder:
 def make_embedder(name: str = "auto") -> tuple[object, list[str]]:
     """Retriever in the documented order: DINOv2-small, open_clip ViT-B-32, classic."""
     name = (name or "auto").lower()
-    builders = {"dinov2-small": Dinov2Embedder, "openclip-vit-b-32": OpenClipEmbedder, "classic-hog": ClassicEmbedder}
-    aliases = {"dinov2": "dinov2-small", "openclip": "openclip-vit-b-32", "open_clip": "openclip-vit-b-32",
-               "classic": "classic-hog"}
+    builders = {"dinov2-small": Dinov2Embedder, "dinov2-base": Dinov2BaseEmbedder,
+                "openclip-vit-b-32": OpenClipEmbedder, "classic-hog": ClassicEmbedder}
+    aliases = {"dinov2": "dinov2-small", "dinov2-b": "dinov2-base", "openclip": "openclip-vit-b-32",
+               "open_clip": "openclip-vit-b-32", "classic": "classic-hog"}
     name = aliases.get(name, name)
     if name != "auto":
         return builders[name](), []
@@ -514,6 +540,7 @@ class FrameEval:
     verify_ms: float = 0.0
     total_ms: float = 0.0
     sims: np.ndarray | None = field(default=None, repr=False)  # not serialized
+    verifs: dict = field(default_factory=dict, repr=False)  # ref idx -> Verification, not serialized
 
     def best_demo(self, t_lo: float = -2.0) -> Cand | None:
         c = [c for c in self.cands if c.demo and c.sim >= t_lo]
@@ -522,7 +549,7 @@ class FrameEval:
     def best_comp_inliers(self) -> int:
         return max((c.inliers for c in self.cands if not c.demo), default=0)
 
-    def decide(self, s: Settings, mode: str = "geometry") -> tuple[bool, Cand | None]:
+    def decide(self, s: Settings, mode: str = "geometry", margin: float | None = None) -> tuple[bool, Cand | None]:
         if mode == "retrieval":
             t = self.top_any
             ok = t is not None and t.demo and t.sim >= s.T_HI
@@ -534,6 +561,10 @@ class FrameEval:
         comp = self.best_comp_inliers()
         if ok and comp > 0 and b.inliers < s.PLACE_RATIO * comp:
             ok = False
+        if ok and margin:  # several candidate places: the best must clearly beat the runner-up
+            other = max((c.inliers for c in self.cands if c.demo and c.place != b.place), default=0)
+            if other > 0 and b.inliers < margin * other:
+                ok = False
         return ok, b
 
     def to_json(self) -> dict:
@@ -559,6 +590,7 @@ class _Ref:
     demo: bool
     feats: Features
     K: np.ndarray
+    masks: list = field(default_factory=list)  # movable-object boxes (px) masked out of this view
 
 
 # ---------------------------------------------------------------- the Localizer
@@ -567,17 +599,23 @@ class Localizer:
 
     def __init__(self, data_dir: str | Path | None = None, settings: Settings | None = None,
                  matcher=None, embedder=None, competitors="auto", mode: str = "geometry",
-                 pano_id: str | None = None, ref_size: tuple[int, int] = REF_SIZE, verbose: bool = True):
+                 pano_id: str | None = None, ref_size: tuple[int, int] = REF_SIZE, verbose: bool = True,
+                 ref_detector=None, ref_detector_id: str = "detector", places=None):
         t0 = time.perf_counter()
         self.data_dir = Path(data_dir) if data_dir else DATA_DIR
         self.s = settings or Settings.load(self.data_dir / "calibration.json")
         self.mode = mode
         self.ref_size = tuple(ref_size)
         self.verbose = verbose
+        # Optional detector (image -> detections) used to mask people and furniture out of the
+        # pano reference views, the same way the live frame is masked.
+        self.ref_detector = ref_detector
+        self.ref_detector_id = ref_detector_id
         self.notes: list[str] = []
         meta = load_pano_meta(self.data_dir)
         self.pano_id = pano_id or meta["pano_id"]
         self.label = meta.get("label") or "this spot"
+        self._meta = meta
         if matcher is None:
             matcher, n = make_matcher(self.s.matcher)
             self.notes += n
@@ -592,14 +630,29 @@ class Localizer:
 
         self._refs: list[_Ref] = []
         self._load_place(self.pano_id, demo=True)
+        # places: None = one candidate place (the configured pano); "all" or N = also treat the
+        # other panos on disk (nearest N) as candidate places, so we report which one we are at.
+        competitors_arg = competitors
+        self.candidate_places: list[str] = [self.pano_id]
+        for pid in self._candidate_ids(meta, places):
+            try:
+                self._load_place(pid, demo=True)
+                self.candidate_places.append(pid)
+            except FileNotFoundError as ex:
+                self.notes.append(f"candidate place {pid} skipped: {ex}")
+        self.multi = len(self.candidate_places) > 1
+        self._place: str | None = None  # the place currently reported (multi mode)
+        self._votes: dict[str, int] = {}
         self.competitors: list[str] = []
+        if self.multi and competitors == "auto":
+            competitors = []  # every pano is a candidate already
         for cid in self._competitor_ids(meta, competitors):
             try:
                 self._load_place(cid, demo=False)
                 self.competitors.append(cid)
             except FileNotFoundError as ex:
                 self.notes.append(f"competitor {cid} skipped: {ex}")
-        if competitors == "auto" or (isinstance(competitors, (list, tuple)) and ONSITE_NEG in competitors):
+        if competitors_arg == "auto" or (isinstance(competitors, (list, tuple)) and ONSITE_NEG in competitors):
             self._load_onsite_negatives()
         self._emb = self._embed_refs([r for r in self._refs])
         self._bow = BowIndex([r.feats for r in self._refs])
@@ -611,6 +664,17 @@ class Localizer:
         self._sims: np.ndarray | None = None
         self.n_onsite = 0
         self.last_debug: dict = {}
+        self.position: PositionSolver | None = None
+        self.tracker = PositionTracker()
+        self.clock = time.monotonic  # tracker time source (tests replace it)
+        self._scan_xyz = {k: np.asarray(v, float) for k, v in self._place_positions(meta).items()}
+        if POSITION_ON:
+            try:
+                self.position = PositionSolver.load(self.data_dir)
+            except Exception as ex:  # position is optional; never block localization
+                self.notes.append(f"position solver off: {ex}")
+            if self.position is None:
+                self.notes.append("position solver off (no data/matterport/pano_frame.json or mesh)")
         self.startup_s = time.perf_counter() - t0
         if verbose:
             print(f"[localize] {self.info_line()} startup {self.startup_s:.1f}s", file=sys.stderr)
@@ -618,13 +682,88 @@ class Localizer:
                 print(f"[localize] {n}", file=sys.stderr)
 
     # -- loading -------------------------------------------------------------
+    def _place_positions(self, meta: dict) -> dict[str, tuple[float, float, float]]:
+        pos: dict[str, tuple[float, float, float]] = {}
+        f = self.data_dir / "matterport" / "panoLocations.json"
+        if f.is_file():
+            try:
+                def walk(v):
+                    if isinstance(v, dict):
+                        if "id" in v and isinstance(v.get("position"), dict):
+                            p = v["position"]
+                            pos[v["id"]] = (float(p["x"]), float(p["y"]), float(p["z"]))
+                        for c in v.values():
+                            walk(c)
+                    elif isinstance(v, list):
+                        for c in v:
+                            walk(c)
+                walk(json.loads(f.read_text()))
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+        for n in meta.get("negatives", []):
+            p = n.get("position")
+            if p and n["pano_id"] not in pos:
+                pos[n["pano_id"]] = (float(p["x"]), float(p["y"]), float(p["z"]))
+        if meta.get("position") and self.pano_id not in pos:
+            p = meta["position"]
+            pos[self.pano_id] = (float(p["x"]), float(p["y"]), float(p["z"]))
+        return pos
+
+    def _candidate_ids(self, meta: dict, places) -> list[str]:
+        """Other panos on disk to treat as candidate places, nearest first."""
+        if places in (None, False, 0, "none", "1", 1):
+            return []
+        root = self.data_dir / "pano"
+        ids = [d.name for d in sorted(root.iterdir())
+               if d.is_dir() and d.name != self.pano_id and (d / "face_1.jpg").exists()]
+        if isinstance(places, (list, tuple)):
+            ids = [p for p in places if p != self.pano_id and p in ids]
+        pos = self._place_positions(meta)
+        here = np.array(pos.get(self.pano_id, (0.0, 0.0, 0.0)))
+        ids.sort(key=lambda i: float(np.linalg.norm(np.array(pos[i]) - here)) if i in pos else 1e9)
+        if isinstance(places, str) and places.isdigit():
+            places = int(places)
+        if isinstance(places, int):
+            ids = ids[: max(0, places - 1)]  # places counts the configured pano too
+        return ids
+
+    def place_label(self, pid: str) -> str:
+        """A speakable name for a place: room name, else the scan number, else the pano label."""
+        if pid == self.pano_id:
+            return self.label
+        for n in self._meta.get("negatives", []):
+            if n.get("pano_id") == pid and n.get("room"):
+                return str(n["room"])
+        f = self.data_dir / "matterport" / "panoLocations.json"
+        if f.is_file():
+            try:
+                lab = None
+
+                def walk(v):
+                    nonlocal lab
+                    if isinstance(v, dict):
+                        if v.get("id") == pid and v.get("label") is not None:
+                            lab = v["label"]
+                        for c in v.values():
+                            walk(c)
+                    elif isinstance(v, list):
+                        for c in v:
+                            walk(c)
+                walk(json.loads(f.read_text()))
+                if lab is not None:
+                    return f"scan point {lab}"
+            except (OSError, ValueError):
+                pass
+        return self.label
+
     def _competitor_ids(self, meta: dict, competitors) -> list[str]:
         if competitors in (None, "none", False, 0):
             return []
         if competitors != "auto":
-            return [c for c in competitors if c not in (self.pano_id, ONSITE_NEG)]
+            return [c for c in competitors if c not in (self.pano_id, ONSITE_NEG) and c not in self.candidate_places]
         negs = sorted(meta.get("negatives", []), key=lambda n: n.get("dist_m", 1e9))
-        ids = [n["pano_id"] for n in negs if (self.data_dir / "pano" / n["pano_id"] / "face_1.jpg").exists()]
+        ids = [n["pano_id"] for n in negs if n["pano_id"] not in self.candidate_places
+               and (self.data_dir / "pano" / n["pano_id"] / "face_1.jpg").exists()]
         return ids[:MAX_COMPETITORS]
 
     def _load_place(self, place: str, demo: bool) -> None:
@@ -643,10 +782,11 @@ class Localizer:
                 views = build_refs(sampler, self.s.HFOV_DEG, self.ref_size)
             else:
                 views = build_refs(sampler, self.s.HFOV_DEG, self.ref_size, yaws=COMP_YAWS, pitches=(0,))
-        feats = self._cached_features(pdir, views)
+        masks = self._masks_for(pdir, views)
+        feats = self._cached_features(pdir, views, masks)
         for v, f in zip(views, feats):
             w, h = v.image.shape[1], v.image.shape[0]
-            self._refs.append(_Ref(v, place, demo, f, intrinsics(w, h, v.hfov)))
+            self._refs.append(_Ref(v, place, demo, f, intrinsics(w, h, v.hfov), list(masks.get(v.name, ()))))
 
     def _load_onsite_negatives(self) -> None:
         """Frames captured away from the scan point (Part 1: POST /api/capture/neg ->
@@ -670,10 +810,22 @@ class Localizer:
             self.competitors.append(ONSITE_NEG)
             self.notes.append(f"{len(files)} on-site negative frames used as competing views")
 
-    def _cached_features(self, pdir: Path, views: list[RefView]) -> list[Features]:
+    def _masks_for(self, pdir: Path, views: list[RefView]) -> dict:
+        if self.ref_detector is None:
+            return {}
+        masks = compute_masks(pdir / "cache", views, self.ref_detector, mask_key(self.ref_detector_id, 0))
+        n = sum(len(b) for b in masks.values())
+        self.notes.append(f"{pdir.name}: masked {n} movable objects in {len(views)} reference views")
+        return masks
+
+    def _cached_features(self, pdir: Path, views: list[RefView], masks: dict | None = None) -> list[Features]:
         """Reference keypoints, cached per place/matcher/size (LightGlue on CPU is slow)."""
         w, h = self.ref_size
-        key = f"feats_{self.matcher.name.replace('+', '_')}_{w}x{h}_{self.s.HFOV_DEG:g}.npz"
+        masks = masks or {}
+        tag = ""
+        if any(masks.values()):  # masked features must not share a cache with unmasked ones
+            tag = "_m" + mask_key(json.dumps({k: masks[k] for k in sorted(masks)}), 0)
+        key = f"feats_{self.matcher.name.replace('+', '_')}_{w}x{h}_{self.s.HFOV_DEG:g}{tag}.npz"
         cache = pdir / "cache" / key
         names = [v.name for v in views]
         if cache.exists():
@@ -689,7 +841,7 @@ class Localizer:
                     return out
             except Exception:  # noqa: BLE001 - a bad cache is just recomputed
                 pass
-        out = [extract_features(self.matcher, normalize_contrast(v.image)) for v in views]
+        out = [extract_features(self.matcher, normalize_contrast(v.image), masks.get(v.name) or ()) for v in views]
         try:
             arrs = {"names": np.array(names)}
             for i, f in enumerate(out):
@@ -702,8 +854,57 @@ class Localizer:
             pass
         return out
 
+    def _embed_imgs(self, refs: list[_Ref]) -> np.ndarray:
+        imgs = []
+        for r in refs:
+            img = normalize_contrast(r.view.image)
+            imgs.append(blank_boxes(img, r.masks) if r.masks else img)
+        return self.embedder.embed_batch(imgs)
+
     def _embed_refs(self, refs: list[_Ref]) -> np.ndarray:
-        return self.embedder.embed_batch([normalize_contrast(r.view.image) for r in refs])
+        """Embeddings for every reference. Pano views are cached per place (embedding thousands of
+        views is slow); on-site frames and other non-pano references are embedded fresh."""
+        out: list[np.ndarray | None] = [None] * len(refs)
+        groups: dict[str, list[int]] = {}
+        for i, r in enumerate(refs):
+            if r.view.source == "pano" and r.place != ONSITE_NEG:
+                groups.setdefault(r.place, []).append(i)
+        for place, idx in groups.items():
+            group = [refs[i] for i in idx]
+            names = [r.view.name for r in group]
+            tag = mask_key(json.dumps([names, [r.masks for r in group]]), 0)
+            cache = self.data_dir / "pano" / place / "cache" / f"emb_{self.embedder.name}_{tag}.npy"
+            arr = None
+            if cache.exists():
+                try:
+                    arr = np.load(cache, allow_pickle=False)
+                    if arr.shape[0] != len(group):
+                        arr = None
+                except Exception:  # noqa: BLE001 - a bad cache is just recomputed
+                    arr = None
+            if arr is None:
+                arr = self._embed_imgs(group)
+                try:
+                    cache.parent.mkdir(parents=True, exist_ok=True)
+                    np.save(cache, arr)
+                except OSError:
+                    pass
+            for k, i in enumerate(idx):
+                out[i] = arr[k]
+        rest = [i for i, v in enumerate(out) if v is None]
+        if rest:
+            fresh = self._embed_imgs([refs[i] for i in rest])
+            for k, i in enumerate(rest):
+                out[i] = fresh[k]
+        return np.vstack(out) if out else np.zeros((0, 1), np.float32)
+
+    def masked_regions(self) -> list:
+        """Masked people/furniture on the demo pano as equirect polygons (for the viewer)."""
+        demo = [r for r in self._refs if r.demo and r.view.source == "pano" and r.masks]
+        if not demo:
+            return []
+        h, w = demo[0].view.image.shape[:2]
+        return region_polygons([r.view for r in demo], {r.view.name: r.masks for r in demo}, (w, h))
 
     # -- helpers ---------------------------------------------------------------
     def _prep(self, frame_rgb) -> np.ndarray:
@@ -719,11 +920,13 @@ class Localizer:
             img = cv2.resize(img, (w, h), interpolation=cv2.INTER_AREA)
         return img
 
-    def _verify(self, i: int, sim: float, feats: Features, K_live: np.ndarray) -> Cand:
+    def _verify(self, i: int, sim: float, feats: Features, K_live: np.ndarray, store: dict | None = None) -> Cand:
         r = self._refs[i]
         v = verify(self.matcher, feats, r.feats, K_live, r.K)
         if hasattr(self, "_verified_live_points"):
             self._verified_live_points[i] = v.live_pts
+        if store is not None:
+            store[i] = v
         c = Cand(i, r.view.name, r.place, r.demo, float(sim), v.inliers, v.grid_cells, v.h_inliers,
                  v.n_matches, ms=v.ms)
         pose = live_pose(v, r.view.yaw, r.view.pitch, r.view.roll)
@@ -739,8 +942,9 @@ class Localizer:
 
     def _yaw_neighbor(self, yaw: float) -> int | None:
         best, bd = None, 1e9
+        place = (self._place if self.multi else None) or self.pano_id
         for i, r in enumerate(self._refs):
-            if r.demo and r.view.source == "pano" and r.view.pitch == 0:
+            if r.demo and r.view.source == "pano" and r.view.pitch == 0 and r.place == place:
                 d = ang_diff(r.view.yaw, yaw)
                 if d < bd:
                     best, bd = i, d
@@ -787,7 +991,8 @@ class Localizer:
                 demo_ids.append(i)
         t3 = time.perf_counter()
         K_live = intrinsics(w, h, self.s.HFOV_DEG)
-        cands = [self._verify(i, sims[i], feats, K_live) for i in demo_ids]
+        verifs: dict = {}
+        cands = [self._verify(i, sims[i], feats, K_live, verifs) for i in demo_ids]
         best = max(cands, key=lambda c: (c.inliers, c.grid), default=None)
         run_comp = competitors == "always" or (
             best is not None and best.inliers >= self.s.N_MIN and best.grid >= self.s.GRID_CELLS_MIN)
@@ -799,11 +1004,12 @@ class Localizer:
             self._cand_of(top_demo_ids[0], sims) if top_demo_ids else None,
             self._cand_of(top_any_ids[0], sims) if top_any_ids else None,
             embed_ms=(t2 - t1) * 1000, extract_ms=(t3 - t2) * 1000 + (t1 - t0) * 1000,
-            verify_ms=(t4 - t3) * 1000, total_ms=(t4 - t0) * 1000, sims=sims,
+            verify_ms=(t4 - t3) * 1000, total_ms=(t4 - t0) * 1000, sims=sims, verifs=verifs,
         )
 
     # -- contract ----------------------------------------------------------------
-    def update(self, frame_rgb, detections, heading_deg) -> Location:
+    def update(self, frame_rgb, detections, heading_deg, pitch_deg=None, roll_deg=None,
+               moving: bool | None = None) -> Location:
         with self._lock:
             t0 = time.perf_counter()
             self._n += 1
@@ -817,7 +1023,32 @@ class Localizer:
                                      verify_cands=self.mode != "retrieval")
             if embed_now:
                 self._sims = fe.sims
-            matched, best = fe.decide(self.s, self.mode)
+            matched, best = fe.decide(self.s, self.mode, MULTI_MARGIN if self.multi else None)
+            distinctive = None
+            if self.multi and matched and best is not None:
+                from server.disambiguation import distinctive_support
+                prepared = self._prep(frame_rgb)
+                distinctive = distinctive_support(best, fe.cands,
+                    {i: v.live_pts for i, v in fe.verifs.items()},
+                    (prepared.shape[1], prepared.shape[0]), self.s.N_MIN)
+                if not distinctive["passed"]:
+                    matched = False
+            imu_rejected = False
+            if matched and best is not None and pitch_deg is not None and best.pitch is not None:
+                if abs(float(best.pitch) - float(pitch_deg)) > PITCH_GATE_DEG:
+                    matched, imu_rejected = False, True
+            still = moving is False
+            fix = (self._position_fix(fe, best, frame_rgb.shape)
+                   if matched and best is not None and self.mode != "retrieval" else None)
+            track = self.tracker.step(self.clock(), moving, self._measurement(best, fix) if matched else None)
+            jump_rejected = False
+            if matched and best is not None and track.rejected and best.place != self.tracker.place:
+                matched, jump_rejected = False, True  # implausibly far from the tracked position
+            if self.multi and track.reinit and best is not None and best.place != self._place:
+                self._place, self._votes = best.place, {}  # tracker restarted there: switch now
+                self._sm.reset()
+            elif self.multi:
+                matched, best = self._hold_place(matched, best, hold=still)
             yaw = None
             conf = 0.0
             if matched and best is not None:
@@ -828,10 +1059,17 @@ class Localizer:
                     yaw = best.yaw
                     conf = min(1.0, best.inliers / (2.0 * max(1, self.s.N_MIN)))
             st = self._sm.step(matched, yaw, heading, conf)
+            position = self._track_view(track, fix, still)
             ref = best or fe.top_demo
+            pano_id, label = self.pano_id, self.label
+            if self.multi:
+                if st.state == LOST:
+                    self._place, self._votes = None, {}
+                pano_id = self._place or (ref.place if ref else self.pano_id)
+                label = self.place_label(pano_id)
             loc = Location(
-                pano_id=self.pano_id,
-                label=self.label,
+                pano_id=pano_id,
+                label=label,
                 state=st.state,
                 score=round(float(ref.sim), 4) if ref else 0.0,
                 inliers=int(best.inliers) if best else 0,
@@ -840,6 +1078,14 @@ class Localizer:
                 best_ref=ref.name if ref else None,
             )
             self.last_debug = {
+                "match": self._match_view(fe, best, ref, st.yaw, frame_rgb.shape, position),
+                "position": fix.to_dict() if fix is not None else None,
+                "moving": moving, "jump_rejected": jump_rejected,
+                "distinctive_evidence": distinctive,
+                "track": {"accepted": track.accepted, "rejected": track.rejected, "reinit": track.reinit,
+                          "d2": None if track.d2 is None else round(track.d2, 2)},
+                "imu_rejected": imu_rejected,
+                "imu_pitch": pitch_deg, "imu_roll": roll_deg,
                 "matched": matched, "embed": round(fe.embed_ms, 1), "extract": round(fe.extract_ms, 1),
                 "verify": round(fe.verify_ms, 1), "total": round((time.perf_counter() - t0) * 1000, 1),
                 "candidates": [(c.name, c.place, c.inliers, c.grid) for c in fe.cands],
@@ -855,6 +1101,106 @@ class Localizer:
                 "frame_shape": list(frame_rgb.shape),
             }
             return loc
+
+    def _hold_place(self, matched: bool, best, hold: bool = False):
+        """Multi-place hysteresis: a different place must win on SWITCH_FRAMES frames in a row.
+        hold (the phone is not walking): the current place cannot change at all."""
+        if not matched or best is None:
+            self._votes = {}
+            return matched, best
+        place = best.place
+        if self._place is None or place == self._place:
+            self._place, self._votes = place, {}
+            return True, best
+        if hold:
+            self._votes = {}
+            return False, best
+        n = self._votes.get(place, 0) + 1
+        self._votes = {place: n}
+        if n >= SWITCH_FRAMES:
+            self._place, self._votes = place, {}
+            self._sm.reset()  # yaw history belongs to the old place
+            return True, best
+        return False, best  # hold the current place until the new one is confirmed
+
+    def _measurement(self, best, fix) -> Measurement | None:
+        """Tracker input for a verified match: the PnP fix, else the matched scan point."""
+        if best is None:
+            return None
+        if fix is not None and fix.world is not None:
+            return Measurement(np.asarray(fix.world, float), fix_sigma(fix.inliers, fix.offset_m), best.place)
+        xyz = self._scan_xyz.get(best.place)
+        return None if xyz is None else Measurement(xyz, SCAN_POINT_SIGMA_M, best.place)
+
+    def _track_view(self, track, fix, still: bool) -> dict | None:
+        """Tracked position for the viewer (None until the tracker has a measurement)."""
+        xyz = self.tracker.xyz
+        if xyz is None:
+            return None
+        return {"place": self.tracker.place, "x": round(float(xyz[0]), 3), "y": round(float(xyz[1]), 3),
+                "z": round(float(xyz[2]), 3), "sigma_m": round(float(self.tracker.sigma_m), 3),
+                "still": still, "n": self.tracker.n_accepted,
+                "source": "pnp" if fix is not None and track.accepted else ("scan_point" if track.accepted else "track"),
+                "rejected": track.rejected, "reinit": track.reinit,
+                "raw": None if fix is None or fix.world is None else [round(float(v), 3) for v in fix.world],
+                "offset_m": round(float(fix.offset_m), 3) if fix is not None else None,
+                "inliers": int(fix.inliers) if fix is not None else 0}
+
+    def _position_fix(self, fe, best, shape):
+        """Metric camera position for the verified best match, or None."""
+        if self.position is None or best is None:
+            return None
+        v = fe.verifs.get(best.idx)
+        if v is None:
+            return None
+        try:
+            r = self._refs[best.idx]
+            h, w = self._prep_shape(shape)
+            return self.position.solve(v, (r.place, r.view.name), r.place, r.feats.kpts, r.view.yaw,
+                                       r.view.pitch, r.view.roll, r.K, intrinsics(w, h, self.s.HFOV_DEG))
+        except Exception:  # position must never break localization
+            return None
+
+    def _prep_shape(self, shape) -> tuple[int, int]:
+        """(h, w) of a frame after _prep's resize to the reference width."""
+        h, w = shape[:2]
+        W = self.ref_size[0]
+        return (max(1, int(round(h * W / w))), W) if w != W else (h, w)
+
+    def _match_view(self, fe, best, ref, yaw, shape, position=None) -> dict | None:
+        """For the viewer: places ranked by retrieval score, and where the frame sits on the pano."""
+        try:
+            sims = fe.sims
+            if sims is None:
+                return None
+            places = [r.place for r in self._refs][: len(sims)]
+            inl: dict[str, int] = {}
+            for c in fe.cands:
+                inl[c.place] = max(inl.get(c.place, 0), int(c.inliers))
+            ranking = rank_places(np.asarray(sims)[: len(places)], places, top=8, inliers=inl)
+            # "Where on the pano" shows the highest-confidence view of this frame: the verified
+            # candidate (scan point pano) with the most inliers, which may differ from the place
+            # currently reported while hysteresis holds it.
+            top = max((c for c in fe.cands if c.demo and c.yaw is not None and c.inliers > 0),
+                      key=lambda c: (c.inliers, c.grid), default=None)
+            if top is None and best is not None and best.yaw is not None:
+                top = best
+            footprint = None
+            if top is not None:
+                h, w = shape[:2]
+                # This frame's own camera pose from that view (not the smoothed, tracked yaw).
+                footprint = footprint_polygon(
+                    top.yaw, top.pitch or 0.0, top.roll or 0.0,
+                    self.s.HFOV_DEG, h / max(1, w)
+                )
+            out = {"ranking": ranking, "footprint": footprint,
+                   "pano": top.place if top is not None else None,
+                   "pano_inliers": int(top.inliers) if top is not None else 0}
+            if position is not None:
+                out["position"] = position
+            return out
+        except Exception:  # visualisation must never break localization
+            return None
 
     def add_reference(self, frame_rgb) -> bool:
         """Warm-up: verify the frame against the pano views (not against other on-site
@@ -915,10 +1261,13 @@ class Localizer:
             self._sm.reset()
             self._n = 0
             self._sims = None
+            self._place, self._votes = None, {}
+            self.tracker.reset()
 
     def info(self) -> dict:
         return {
             "pano_id": self.pano_id, "label": self.label, "mode": self.mode,
+            "candidate_places": self.candidate_places,
             "n_refs": int(self._is_pano_demo.sum()), "n_onsite": self.n_onsite,
             "competitors": self.competitors, "n_competitor_refs": int((~self._is_demo).sum()),
             "matcher": self.matcher.name, "retriever": self.embedder.name,

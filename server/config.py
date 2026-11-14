@@ -31,6 +31,9 @@ MATTERPORT_MODEL_ID = os.getenv("MATTERPORT_MODEL_ID", "P3S6VUTP3qB")
 DEFAULT_PANO_ID = "1k478kza39tbfu1uhbttg5ybb"
 DEFAULT_PANO_LABEL = "Rabinowitz Hall"
 LOCALIZER = os.getenv("LOCALIZER", "stub")
+CANDIDATE_PLACES = os.getenv("CANDIDATE_PLACES", "all")  # "all", a number N (nearest N), or "1"
+# Opt in: mask people and furniture out of the pano reference views.
+MASK_REFS = env_bool("MASK_REFS", False)
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,8 @@ class Settings:
     record: bool = RECORD
     localizer: str = LOCALIZER
     localization_scope: str = os.getenv("LOCALIZATION_SCOPE", "property")
+    mask_refs: bool = MASK_REFS
+    candidate_places: str = CANDIDATE_PLACES
     detector: str = os.getenv("DETECTOR", "yolo")
     yolo_device: str = os.getenv("YOLO_DEVICE", "auto")
     yolo_model: str = os.getenv("YOLO_MODEL", "yolo11n.pt")
@@ -58,7 +63,8 @@ class Settings:
     pano_id: str | None = os.getenv("PANO_ID") or None
     pano_label: str | None = os.getenv("PANO_LABEL") or None
     max_message_bytes: int = 4 * 1024 * 1024
-    max_image_pixels: int = 12_000_000
+    max_image_pixels: int = 50_000_000  # hard cap; phone photos are 12 MP and get downscaled
+    max_frame_side: int = 1280  # longest side after decoding; larger frames are downscaled
     viewer_fps: float = 10.0
     metrics_window_s: float = 60.0
     send_timeout_s: float = 2.0
@@ -91,6 +97,10 @@ class Settings:
             raise ValueError("Cooldown must be nonnegative; MIN_GAP_S must be >= 0.8")
         if not 0 < self.viewer_fps <= 10 or not 1 <= self.port <= 65535:
             raise ValueError("Invalid viewer frequency or port")
+        if self.candidate_places != "all" and not self.candidate_places.isdigit():
+            raise ValueError("CANDIDATE_PLACES must be 'all' or a number")
+        if self.max_frame_side < 64:
+            raise ValueError("max_frame_side must be at least 64")
         if self.metrics_window_s <= 0 or self.send_timeout_s <= 0:
             raise ValueError("Metrics window and send timeout must be positive")
         if not re.fullmatch(r"[A-Za-z0-9]{6,32}", self.matterport_model_id):
