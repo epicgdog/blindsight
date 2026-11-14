@@ -132,8 +132,7 @@ def pano():
         ],
         "floors": [{"floor": 0, "z": 1.3, "count": 4}, {"floor": 1, "z": 5.3, "count": 1}],
         "bounds": {"min_x": -4.0, "max_x": 6.0, "min_y": -2.0, "max_y": 4.0},
-        "plan": {"url": "/api/floorplan/0", "width": 1000, "height": 800, "resolution": 50.0,
-                 "origin": {"x": -10.0, "y": -8.0}, "floor": 0, "label": "Floor 1"},
+        "walls": [[-6.0, -4.0, 8.0, -4.0], [8.0, -4.0, 8.0, 6.0], [8.0, 6.0, -6.0, 6.0], [-6.0, 6.0, -6.0, -4.0]],
     }, "faces": [f"/pano/face_{i}.jpg" for i in range(6)],
             "thresholds": {"locked": 0.7, "uncertain": 0.4}}
 
@@ -175,17 +174,6 @@ def capture(kind: str):
     p = d / f"{int(time.time() * 1000)}.jpg"
     p.write_bytes(latest["jpeg"])
     return {"saved": True, "path": str(p.relative_to(DATA.parent)) if DATA.parent in p.parents else p.name}
-
-
-@app.get("/api/floorplan/{floor}")
-def floorplan(floor: str):
-    from fastapi.responses import Response
-    from io import BytesIO
-    from PIL import Image
-
-    buf = BytesIO()
-    Image.new("RGB", (100, 80), (40, 44, 60)).save(buf, "PNG")
-    return Response(buf.getvalue(), media_type="image/png")
 
 
 @app.get("/")

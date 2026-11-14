@@ -58,3 +58,5 @@ h2 { margin:0 0 6px; font-size:22px; }
 .mm-dot.mm-candidate { fill:var(--warn); }
 .mm-dot.mm-active { fill:var(--ok); stroke:#fff; stroke-width:3; }
 #mm-place { font-size:26px; font-weight:700; margin-top:6px; min-height:34px; }
+.mm-walls { fill:none; stroke:#aab4cc; stroke-width:2; vector-effect:non-scaling-stroke; stroke-linecap:round; }
+.mm-dot.mm-estimate { fill:#f5a52455; stroke:var(--warn); stroke-width:4; }

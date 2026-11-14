@@ -99,4 +99,5 @@ def test_minimap_highlights_the_current_place(server):
     assert len(re.findall(r'class="mm-dot mm-active"', dom)) == 1
     assert re.search(r'id="mm-place"[^>]*>\s*Hallway', dom)
     assert re.search(r'id="mm-floor"[^>]*>\s*Floor 1', dom)
-    assert re.search(r'<image[^>]*href="/api/floorplan/0"', dom)  # the 3D model's floor plan is the backdrop
+    assert re.search(r'<path class="mm-walls" d="M[^"]+L', dom)  # wall outlines from the mesh
+    assert re.search(r'class="mm-dot mm-active"', dom)  # the estimated position

@@ -202,14 +202,3 @@ def test_api_pano_includes_the_minimap_data(settings):
     assert pano["map"]["points"][0]["id"] == "a"
     assert pano["map"]["floors"][0]["count"] == 1
     assert pano["map"]["bounds"]["min_x"] == 1
-
-
-def test_floor_plan_image_is_served(settings):
-    (settings.data_dir / "matterport").mkdir(exist_ok=True)
-    (settings.data_dir / "matterport" / "floor1.png").write_bytes(b"\x89PNG-test")
-    with TestClient(create_app(settings)) as client:
-        ok = client.get("/api/floorplan/0")
-        assert ok.status_code == 200 and ok.content == b"\x89PNG-test"
-        assert ok.headers["content-type"] == "image/png"
-        assert client.get("/api/floorplan/5").status_code == 404
-        assert client.get("/api/floorplan/abc").status_code == 404
