@@ -77,3 +77,21 @@ test("maskSummary words the legend", () => {
   assert.equal(maskSummary(1), "1 region ignored (people, furniture)");
   assert.equal(maskSummary(42), "42 regions ignored (people, furniture)");
 });
+
+import { yawText, errorText } from "../logic.js";
+
+test("yawText shows unknown instead of 0 degrees when the server has no heading", () => {
+  assert.equal(yawText(null), "–");
+  assert.equal(yawText(undefined), "–");
+  assert.equal(yawText(NaN), "–");
+  assert.equal(yawText(0), "0°");
+  assert.equal(yawText(328.4), "328°");
+});
+
+test("errorText turns server errors into a visible message", () => {
+  assert.equal(errorText(409, { detail: "Connect a frame source before starting warm-up" }),
+    "Connect a frame source before starting warm-up");
+  assert.equal(errorText(409, null), "Request refused (409)");
+  assert.equal(errorText(500, { detail: [{ msg: "bad" }] }), "Server error (500)");
+  assert.equal(errorText(200, {}), "");
+});

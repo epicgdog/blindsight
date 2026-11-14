@@ -137,3 +137,12 @@ export function mapMarkers(map, activeId, ranking, trail, w, h) {
   const active = map.points.find((p) => p.id === activeId);
   return { floor, name: active ? scanName(active) : "", markers };
 }
+
+// ---- readouts and errors ----
+export const yawText = (yaw) => (Number.isFinite(yaw) ? `${Math.round(yaw)}°` : "–");
+
+export function errorText(status, body) {
+  if (status >= 200 && status < 300) return "";
+  if (typeof body?.detail === "string") return body.detail;
+  return status >= 500 ? `Server error (${status})` : `Request refused (${status})`;
+}

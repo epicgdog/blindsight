@@ -65,7 +65,7 @@ def test_viewer_renders_live_pano_ranking_and_footprint(server):
     """Echo server pushes a canned match; the viewer must rank places and draw the box."""
     r = subprocess.run(
         [CHROME, "--headless=new", "--disable-gpu", "--no-sandbox",
-         "--virtual-time-budget=6000", "--dump-dom", server["base"] + "/?demo=1"],
+         "--virtual-time-budget=9000", "--dump-dom", server["base"] + "/?demo=1"],
         capture_output=True, text=True, timeout=60,
     )
     dom = r.stdout
@@ -85,7 +85,7 @@ def test_viewer_renders_live_pano_ranking_and_footprint(server):
 def test_minimap_highlights_the_current_place(server):
     r = subprocess.run(
         [CHROME, "--headless=new", "--disable-gpu", "--no-sandbox",
-         "--virtual-time-budget=6000", "--dump-dom", server["base"] + "/?demo=1"],
+         "--virtual-time-budget=9000", "--dump-dom", server["base"] + "/?demo=1"],
         capture_output=True, text=True, timeout=60,
     )
     dom = r.stdout

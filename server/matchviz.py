@@ -24,8 +24,12 @@ def rank_places(
         s = float(s)
         if p not in best or s > best[p][0]:
             best[p] = (s, i)
-    ranked = sorted(best.items(), key=lambda kv: -kv[1][0])[: max(0, top)]
     inliers = inliers or {}
+    # Places with verified geometric matches come first (most inliers), then the rest by similarity.
+    ranked = sorted(
+        best.items(),
+        key=lambda kv: (-(inliers.get(kv[0], 0) > 0), -inliers.get(kv[0], 0), -kv[1][0]),
+    )[: max(0, top)]
     return [
         {"place": p, "sim": round(s, 4), "ref": int(i), "inliers": int(inliers.get(p, 0))}
         for p, (s, i) in ranked

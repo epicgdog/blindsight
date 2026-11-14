@@ -77,3 +77,15 @@ def test_footprint_points_are_finite_and_json_safe():
 def test_footprint_polar_view_stays_finite():
     poly = footprint_polygon(0, 89, 0, 55, 16 / 9)
     assert all(math.isfinite(v) for p in poly for v in p)
+
+
+def test_rank_places_puts_verified_matches_before_retrieval_only():
+    sims = np.array([0.9, 0.6, 0.8])
+    rows = rank_places(sims, ["A", "B", "C"], top=3, inliers={"B": 30, "C": 5})
+    assert [r["place"] for r in rows] == ["B", "C", "A"]  # inliers first, then similarity
+
+
+def test_rank_places_orders_unverified_places_by_similarity():
+    sims = np.array([0.5, 0.9, 0.7])
+    rows = rank_places(sims, ["A", "B", "C"], top=3)
+    assert [r["place"] for r in rows] == ["B", "C", "A"]
