@@ -50,6 +50,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from matchviz import footprint_polygon, rank_places  # noqa: E402
+from position import PositionSolver  # noqa: E402
 from refmask import compute_masks, mask_key, region_polygons  # noqa: E402
 from geometry import (  # noqa: E402
     Features,
@@ -121,6 +122,9 @@ SWITCH_FRAMES = int(os.environ.get("P3_SWITCH_FRAMES", "2"))
 # IMU gate: a verified match whose pitch disagrees with the phone accelerometer by more than this
 # many degrees is not trusted (gravity gives pitch to a few degrees; vision can lock onto look-alikes).
 PITCH_GATE_DEG = float(os.environ.get("P3_PITCH_GATE_DEG", "15"))
+# Metric position (depth from the scan mesh + PnP) for a verified match. Needs
+# data/matterport/pano_frame.json (tools/calibrate_pano_frame.py). P3_POSITION=0 turns it off.
+POSITION_ON = os.environ.get("P3_POSITION", "1") != "0"
 MAX_ONSITE_NEG = 200  # frames from Part 1's POST /api/capture/neg used as competing views
 ONSITE_NEG = "onsite_negatives"  # place name for those frames
 COMP_YAWS = tuple(range(0, 360, 15))  # competitor views: every 15 degrees at pitch 0
@@ -522,6 +526,7 @@ class FrameEval:
     verify_ms: float = 0.0
     total_ms: float = 0.0
     sims: np.ndarray | None = field(default=None, repr=False)  # not serialized
+    verifs: dict = field(default_factory=dict, repr=False)  # ref idx -> Verification, not serialized
 
     def best_demo(self, t_lo: float = -2.0) -> Cand | None:
         c = [c for c in self.cands if c.demo and c.sim >= t_lo]
@@ -645,6 +650,14 @@ class Localizer:
         self._sims: np.ndarray | None = None
         self.n_onsite = 0
         self.last_debug: dict = {}
+        self.position: PositionSolver | None = None
+        if POSITION_ON:
+            try:
+                self.position = PositionSolver.load(self.data_dir)
+            except Exception as ex:  # position is optional; never block localization
+                self.notes.append(f"position solver off: {ex}")
+            if self.position is None:
+                self.notes.append("position solver off (no data/matterport/pano_frame.json or mesh)")
         self.startup_s = time.perf_counter() - t0
         if verbose:
             print(f"[localize] {self.info_line()} startup {self.startup_s:.1f}s", file=sys.stderr)
@@ -890,9 +903,11 @@ class Localizer:
             img = cv2.resize(img, (w, h), interpolation=cv2.INTER_AREA)
         return img
 
-    def _verify(self, i: int, sim: float, feats: Features, K_live: np.ndarray) -> Cand:
+    def _verify(self, i: int, sim: float, feats: Features, K_live: np.ndarray, store: dict | None = None) -> Cand:
         r = self._refs[i]
         v = verify(self.matcher, feats, r.feats, K_live, r.K)
+        if store is not None:
+            store[i] = v
         c = Cand(i, r.view.name, r.place, r.demo, float(sim), v.inliers, v.grid_cells, v.h_inliers,
                  v.n_matches, ms=v.ms)
         pose = live_pose(v, r.view.yaw, r.view.pitch, r.view.roll)
@@ -957,7 +972,8 @@ class Localizer:
                 demo_ids.append(i)
         t3 = time.perf_counter()
         K_live = intrinsics(w, h, self.s.HFOV_DEG)
-        cands = [self._verify(i, sims[i], feats, K_live) for i in demo_ids]
+        verifs: dict = {}
+        cands = [self._verify(i, sims[i], feats, K_live, verifs) for i in demo_ids]
         best = max(cands, key=lambda c: (c.inliers, c.grid), default=None)
         run_comp = competitors == "always" or (
             best is not None and best.inliers >= self.s.N_MIN and best.grid >= self.s.GRID_CELLS_MIN)
@@ -969,7 +985,7 @@ class Localizer:
             self._cand_of(top_demo_ids[0], sims) if top_demo_ids else None,
             self._cand_of(top_any_ids[0], sims) if top_any_ids else None,
             embed_ms=(t2 - t1) * 1000, extract_ms=(t3 - t2) * 1000 + (t1 - t0) * 1000,
-            verify_ms=(t4 - t3) * 1000, total_ms=(t4 - t0) * 1000, sims=sims,
+            verify_ms=(t4 - t3) * 1000, total_ms=(t4 - t0) * 1000, sims=sims, verifs=verifs,
         )
 
     # -- contract ----------------------------------------------------------------
@@ -1004,6 +1020,7 @@ class Localizer:
                     yaw = best.yaw
                     conf = min(1.0, best.inliers / (2.0 * max(1, self.s.N_MIN)))
             st = self._sm.step(matched, yaw, heading, conf)
+            fix = self._position_fix(fe, best, frame_rgb.shape) if matched and self.mode != "retrieval" else None
             ref = best or fe.top_demo
             pano_id, label = self.pano_id, self.label
             if self.multi:
@@ -1022,7 +1039,8 @@ class Localizer:
                 best_ref=ref.name if ref else None,
             )
             self.last_debug = {
-                "match": self._match_view(fe, best, ref, st.yaw, frame_rgb.shape),
+                "match": self._match_view(fe, best, ref, st.yaw, frame_rgb.shape, fix),
+                "position": fix.to_dict() if fix is not None else None,
                 "imu_rejected": imu_rejected,
                 "imu_pitch": pitch_deg, "imu_roll": roll_deg,
                 "matched": matched, "embed": round(fe.embed_ms, 1), "extract": round(fe.extract_ms, 1),
@@ -1050,7 +1068,28 @@ class Localizer:
             return True, best
         return False, best  # hold the current place until the new one is confirmed
 
-    def _match_view(self, fe, best, ref, yaw, shape) -> dict | None:
+    def _position_fix(self, fe, best, shape):
+        """Metric camera position for the verified best match, or None."""
+        if self.position is None or best is None:
+            return None
+        v = fe.verifs.get(best.idx)
+        if v is None:
+            return None
+        try:
+            r = self._refs[best.idx]
+            h, w = self._prep_shape(shape)
+            return self.position.solve(v, (r.place, r.view.name), r.place, r.feats.kpts, r.view.yaw,
+                                       r.view.pitch, r.view.roll, r.K, intrinsics(w, h, self.s.HFOV_DEG))
+        except Exception:  # position must never break localization
+            return None
+
+    def _prep_shape(self, shape) -> tuple[int, int]:
+        """(h, w) of a frame after _prep's resize to the reference width."""
+        h, w = shape[:2]
+        W = self.ref_size[0]
+        return (max(1, int(round(h * W / w))), W) if w != W else (h, w)
+
+    def _match_view(self, fe, best, ref, yaw, shape, fix=None) -> dict | None:
         """For the viewer: places ranked by retrieval score, and where the frame sits on the pano."""
         try:
             sims = fe.sims
@@ -1069,7 +1108,12 @@ class Localizer:
                 footprint = footprint_polygon(
                     yaw if yaw is not None else best.yaw, pitch, roll, self.s.HFOV_DEG, h / max(1, w)
                 )
-            return {"ranking": ranking, "footprint": footprint}
+            out = {"ranking": ranking, "footprint": footprint}
+            if fix is not None and fix.world is not None and best is not None:
+                out["position"] = {"place": best.place, "x": round(float(fix.world[0]), 3),
+                                   "y": round(float(fix.world[1]), 3), "z": round(float(fix.world[2]), 3),
+                                   "offset_m": round(fix.offset_m, 3), "inliers": fix.inliers}
+            return out
         except Exception:  # visualisation must never break localization
             return None
 

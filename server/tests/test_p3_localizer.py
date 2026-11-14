@@ -336,3 +336,36 @@ def test_no_imu_means_no_gate(loc, room):
     loc.reset()
     loc.update(frame(room, "room_p0", 200), [], 277.0)
     assert loc.last_debug["imu_rejected"] is False
+
+
+def test_reports_metric_position_off_the_scan_point(loc, room):
+    """With a depth source attached, a matched frame carries the camera centre (depth + PnP)."""
+    from p3_room import HI, LO
+    from position import BoxDepth, PlaceFrame, PositionSolver
+
+    saved = loc.position
+    loc.position = PositionSolver(BoxDepth(LO, HI), {pid: PlaceFrame(pos3(pid)) for pid in IDS})
+    try:
+        offset = np.array([0.25, 0.0, -0.2])
+        errs = []
+        for yaw in (30, 120, 250):
+            loc.reset()
+            loc.update(room.render(pos3("room_p0") + offset, yaw, 0, 0, (540, 720), 55.0), [], None)
+            p = (loc.last_debug.get("match") or {}).get("position")
+            assert loc.last_debug["matched"] and p is not None, loc.last_debug
+            assert p["place"] == "room_p0"
+            errs.append(float(np.linalg.norm(np.array([p["x"], p["y"], p["z"]]) - (pos3("room_p0") + offset))))
+        assert max(errs) < 0.25, errs
+    finally:
+        loc.position = saved
+
+
+def test_position_absent_without_depth(loc, room):
+    saved, loc.position = loc.position, None
+    try:
+        loc.reset()
+        loc.update(frame(room, "room_p0", 30), [], None)
+        assert loc.last_debug["position"] is None
+        assert "position" not in (loc.last_debug.get("match") or {})
+    finally:
+        loc.position = saved
