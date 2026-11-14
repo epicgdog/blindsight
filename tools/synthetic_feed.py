@@ -3,7 +3,7 @@
 Lets the whole pipeline run with no phone and no lobby:
   * Part 1's sim client can stream the frame directory (image-dir mode) or import
     iter_feed() directly; frames.jsonl carries the simulated compass heading.
-  * Part 2's backup video renderer can use --video out.mp4.
+  * Part 2's backup video renderer calls frames(n) (JPEG bytes, w, h) or uses --video.
   * make_synthetic.py and eval_localization.py use render_pan() for walkthroughs.
 
 Ground truth (yaw, pitch) is written next to every frame. Headings simulate the
@@ -14,8 +14,6 @@ yaw 0) plus noise.
   python tools/synthetic_feed.py --video data/synthetic/feed.mp4 --seconds 20
   python tools/synthetic_feed.py --pano-id <other id> ...   # a negative walkthrough
 """
-
-from __future__ import annotations
 
 import argparse
 import json
@@ -105,6 +103,24 @@ def iter_feed(data_dir: Path = DATA_DIR, pano_id: str | None = None, fps: float 
     """Hook for Part 1's sim client: `for f in iter_feed(): send(f.frame_rgb, f.heading_deg)`."""
     sampler, _ = load_sampler(data_dir, pano_id)
     yield from render_pan(sampler, int(round(seconds * fps)), fps, **kw)
+
+
+def frames(n: int, size: tuple[int, int] = (480, 640), data_dir: Path = DATA_DIR,
+           pano_id: str | None = None):
+    """Hook for Part 2's backup video renderer: n JPEG frames (bytes, w, h), one full
+    slow turn at the locked pano. Raises FileNotFoundError right away (not on the first
+    frame) when the pano data is missing, so the caller can fall back cleanly."""
+    sampler, _ = load_sampler(data_dir, pano_id)
+    w, h = size
+    fps = 10.0
+    speed = 360.0 * fps / max(int(n), 1)
+
+    def gen():
+        for f in render_pan(sampler, int(n), fps, 0.0, speed, hfov=55.0, size=(w, h), heading=False):
+            ok, buf = cv2.imencode(".jpg", cv2.cvtColor(f.frame_rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 85])
+            yield buf.tobytes(), w, h
+
+    return gen()
 
 
 def main(argv=None) -> int:

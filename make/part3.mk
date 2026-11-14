@@ -60,7 +60,7 @@ p3-selfcheck: ## PASS/FAIL: localizer loads (pano, refs, models) and calibration
 p3-test: ## Part 3 unit + pipeline tests (procedural room, no Matterport data needed)
 	$(P3_PY) -m pytest -q server/tests/test_p3_state_machine.py server/tests/test_p3_geometry.py \
 		server/tests/test_p3_refs.py server/tests/test_p3_localizer.py server/tests/test_p3_eval.py \
-		server/tests/test_p3_fetch.py
+		server/tests/test_p3_fetch.py server/tests/test_p3_feed.py
 
 p3-all: p3-refs p3-synth p3-calibrate p3-eval ## everything after p3-fetch
 
