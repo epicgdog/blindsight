@@ -1,7 +1,7 @@
 """Render the backup demo video: a virtual camera pans a pano, the pipeline runs,
 headless Chrome captures the viewer, ffmpeg encodes it.
 
-Uses tools/synthetic_feed.py (Part 3) if present, else a built-in placeholder pano.
+Uses Part 3's tools/synthetic_feed.py iter_feed() when its pano data is present, else a built-in placeholder pano.
 Until Part 1's server lands this runs against app/dev/echo_server.py.
 Output is labelled SIMULATED FEED. Usage:
     uv run python3 tools/render_backup_video.py --out slides/backup.mp4 [--seconds 60 --fps 5]
@@ -9,6 +9,7 @@ Output is labelled SIMULATED FEED. Usage:
 import argparse
 import base64
 import importlib.util
+import itertools
 import json
 import os
 import shutil
@@ -49,15 +50,31 @@ def placeholder_frames(n: int, w: int = 240, h: int = 320):
         yield buf.getvalue(), w, h
 
 
-def get_frames(n: int):
+def feed_frames(n: int, fps: int):
+    """Frames from Part 3's virtual camera: tools/synthetic_feed.py iter_feed() -> (jpeg, w, h, heading)."""
     p = ROOT / "tools" / "synthetic_feed.py"
-    if p.exists():
-        spec = importlib.util.spec_from_file_location("synthetic_feed", p)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        if hasattr(mod, "frames"):
-            return mod.frames(n)
-    return placeholder_frames(n)
+    spec = importlib.util.spec_from_file_location("synthetic_feed", p)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["synthetic_feed"] = mod  # dataclasses resolve their module through sys.modules
+    spec.loader.exec_module(mod)
+    for f in mod.iter_feed(fps=float(fps), seconds=n / fps):
+        buf = BytesIO()
+        Image.fromarray(f.frame_rgb).save(buf, "JPEG", quality=60)
+        h, w = f.frame_rgb.shape[:2]
+        yield buf.getvalue(), w, h, f.heading_deg
+
+
+def get_frames(n: int, fps: int):
+    """Part 3's feed when it works (pano data present), else a labelled placeholder pan."""
+    if (ROOT / "tools" / "synthetic_feed.py").exists():
+        try:
+            it = feed_frames(n, fps)
+            first = next(it)  # fail early if pano faces or cv2 are missing
+            print("[render] frames: Part 3 synthetic feed (pano pan)", flush=True)
+            return itertools.chain([first], it)
+        except Exception as exc:  # noqa: BLE001 - any failure means use the fallback
+            print(f"[render] Part 3 feed unavailable ({type(exc).__name__}: {exc}); using placeholder", flush=True)
+    return ((j, w, h, None) for j, w, h in placeholder_frames(n))
 
 
 class Cdp:
@@ -127,8 +144,8 @@ def main():
                 "b.style.cssText='position:fixed;bottom:0;left:0;right:0;background:#f5a524;color:#000;"
                 "font:700 24px system-ui;padding:8px;text-align:center;z-index:9';document.body.append(b)" % json.dumps(BANNER)))
             t0 = time.time()
-            for i, (jpeg, w, h) in enumerate(get_frames(n)):
-                hdr = json.dumps({"seq": i + 1, "ts_ms": int(time.time() * 1000), "heading_deg": None, "w": w, "h": h}).encode()
+            for i, (jpeg, w, h, heading) in enumerate(get_frames(n, a.fps)):
+                hdr = json.dumps({"seq": i + 1, "ts_ms": int(time.time() * 1000), "heading_deg": heading, "w": w, "h": h}).encode()
                 phone.send(struct.pack(">I", len(hdr)) + hdr + jpeg)
                 phone.recv(timeout=10)
                 time.sleep(0.15)  # let the viewer render the pushed result
