@@ -360,51 +360,76 @@ def test_reports_metric_position_off_the_scan_point(loc, room):
         loc.position = saved
 
 
-def test_position_absent_without_depth(loc, room):
+def test_without_depth_the_track_uses_the_scan_point(loc, room):
     saved, loc.position = loc.position, None
     try:
         loc.reset()
         loc.update(frame(room, "room_p0", 30), [], None)
-        assert loc.last_debug["position"] is None
-        assert "position" not in (loc.last_debug.get("match") or {})
+        assert loc.last_debug["position"] is None  # no PnP fix
+        p = loc.last_debug["match"]["position"]
+        assert p["source"] == "scan_point" and p["place"] == "room_p0"
     finally:
         loc.position = saved
 
 
-def test_still_phone_holds_and_averages_position(loc, room):
-    """moving=False: fixes are averaged into one held point and an outlier fix is ignored;
-    moving=True drops the hold."""
+def test_still_phone_track_averages_fixes_and_rejects_an_outlier(loc, room):
+    """moving=False: PnP fixes are fused by the Kalman tracker (uncertainty shrinks) and a fix
+    far from the track is gated out without moving it."""
     from p3_room import HI, LO
-    from position import BoxDepth, PlaceFrame, PositionSolver
+    from position import BoxDepth, PlaceFrame, PositionFix, PositionSolver
 
-    saved = loc.position
+    saved, saved_clock = loc.position, loc.clock
     loc.position = PositionSolver(BoxDepth(LO, HI), {pid: PlaceFrame(pos3(pid)) for pid in IDS})
+    t = [0.0]
+    loc.clock = lambda: t[0]
     try:
         loc.reset()
         here = pos3("room_p0") + np.array([0.2, 0.0, 0.1])
-        held = []
-        for yaw in (30, 40, 50):
+        sig = []
+        for yaw in (30, 40, 50, 60):
+            t[0] += 0.25
             loc.update(room.render(here, yaw, 0, 0, (540, 720), 55.0), [], None, moving=False)
-            held.append(loc.last_debug["match"]["position"])
-        assert all(p["held"] for p in held) and held[-1]["n"] == 3
-        # an outlier fix while still does not move the held point
-        anchor = np.array([held[-1][k] for k in "xyz"])
-        loc._anchor["sum"] = anchor * loc._anchor["n"]  # pin exactly for the check below
-        from position import PositionFix
+            p = loc.last_debug["match"]["position"]
+            assert p["source"] == "pnp" and p["still"], p
+            sig.append(p["sigma_m"])
+        assert sig[-1] < sig[0] and loc.tracker.n_accepted == 4
+        before = loc.tracker.xyz.copy()
         orig = loc._position_fix
-        loc._position_fix = lambda *a: PositionFix(np.zeros(3), np.eye(3), 50, 60, 1.0, anchor + [2.0, 0, 0])
+        loc._position_fix = lambda *a: PositionFix(np.zeros(3), np.eye(3), 50, 60, 1.0, before + [3.0, 0, 0])
         try:
-            loc.update(room.render(here, 60, 0, 0, (540, 720), 55.0), [], None, moving=False)
+            t[0] += 0.25
+            loc.update(room.render(here, 70, 0, 0, (540, 720), 55.0), [], None, moving=False)
         finally:
             loc._position_fix = orig
         p = loc.last_debug["match"]["position"]
-        assert p["held"] and p["n"] == 3 and np.allclose([p[k] for k in "xyz"], anchor, atol=1e-3)
-        # walking: the hold is dropped
-        loc.update(room.render(here, 70, 0, 0, (540, 720), 55.0), [], None, moving=True)
-        p = loc.last_debug["match"]["position"]
-        assert p["held"] is False and loc._anchor is None
+        assert p["rejected"] and np.allclose(loc.tracker.xyz, before, atol=1e-6)
+        assert loc.last_debug["matched"]  # same place: the match still counts, only the fix is dropped
     finally:
-        loc.position = saved
+        loc.position, loc.clock = saved, saved_clock
+
+
+def test_jump_to_a_far_place_is_blocked(loc, room):
+    """A measurement 10 m from the tracked position is gated out."""
+    from localize import Cand
+
+    saved_clock = loc.clock
+    t = [0.0]
+    loc.clock = lambda: t[0]
+    try:
+        loc.reset()
+        for _ in range(4):
+            t[0] += 0.25
+            loc.update(frame(room, "room_p0", 30), [], None, moving=True)
+        assert loc.tracker.place == "room_p0"
+        near = loc._measurement(Cand(0, "x", "room_p3", True, 0.9, inliers=200, grid=9), None)
+        assert near is not None and near.place == "room_p3"  # 3.5 m away: reachable, passes the gate
+        from tracker import Measurement
+        far = Measurement(loc.tracker.xyz + [10.0, 0.0, 0.0], 1.0, "room_far")
+        t[0] += 0.25
+        st = loc.tracker.step(t[0], True, far)
+        assert st.rejected and st.d2 > 9.21 and loc.tracker.place == "room_p0"
+    finally:
+        loc.clock = saved_clock
 
 
 def test_still_phone_does_not_switch_place(loc):
