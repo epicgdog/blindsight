@@ -89,3 +89,51 @@ export function maskPolygons(regions, w, h) {
 }
 
 export const maskSummary = (n) => (n > 0 ? `${n} region${n === 1 ? "" : "s"} ignored (people, furniture)` : "");
+
+// ---- minimap: scan points seen from above, floors split by height ----
+// Uniform scale so distances keep their shape; y flips so larger y (north) is at the top.
+export function mapProject(points, bounds, w, h, pad = 20) {
+  if (!points?.length || !bounds) return {};
+  const spanX = Math.max(bounds.max_x - bounds.min_x, 1e-6);
+  const spanY = Math.max(bounds.max_y - bounds.min_y, 1e-6);
+  const scale = Math.min((w - 2 * pad) / spanX, (h - 2 * pad) / spanY);
+  const offX = (w - spanX * scale) / 2, offY = (h - spanY * scale) / 2;
+  const out = {};
+  for (const p of points) {
+    out[p.id] = {
+      x: +(offX + (p.x - bounds.min_x) * scale).toFixed(2),
+      y: +(h - offY - (p.y - bounds.min_y) * scale).toFixed(2),
+    };
+  }
+  return out;
+}
+
+export const floorOfPlace = (points, id) => points?.find((p) => p.id === id)?.floor ?? null;
+
+export function pushTrail(trail, place, max = 8) {
+  if (!place) return trail;
+  const next = trail.filter((p) => p !== place);
+  next.push(place);
+  return next.slice(-max);
+}
+
+const scanName = (p) => (p?.room ? p.room : p?.label != null ? `Scan ${p.label}` : "");
+
+// Markers for the active floor: the active place, ranked candidates, recent trail, other points.
+export function mapMarkers(map, activeId, ranking, trail, w, h) {
+  if (!map?.points?.length) return { floor: null, name: "", markers: [] };
+  const ranked = (ranking ?? []).map((r) => r.place);
+  const focus = activeId ?? ranked[0] ?? null;
+  const floor = floorOfPlace(map.points, focus) ?? 0;
+  const here = map.points.filter((p) => p.floor === floor);
+  const proj = mapProject(here, map.bounds, w, h, 24);
+  const markers = here.map((p) => {
+    let kind = "point";
+    if (p.id === activeId) kind = "active";
+    else if (ranked.slice(0, 3).includes(p.id)) kind = "candidate";
+    else if ((trail ?? []).includes(p.id)) kind = "trail";
+    return { id: p.id, kind, x: proj[p.id].x, y: proj[p.id].y, rank: ranked.indexOf(p.id) + 1 };
+  });
+  const active = map.points.find((p) => p.id === activeId);
+  return { floor, name: active ? scanName(active) : "", markers };
+}

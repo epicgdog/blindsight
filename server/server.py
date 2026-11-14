@@ -38,6 +38,7 @@ if __package__ in {None, ""}:
 from server.config import Settings
 from server.cues import CueEngine, describe
 from server.detect import Detector, StubDetector
+from server.minimap import scan_points
 from server.navigation import navigation_router
 from server.protocol import FramePacket, ProtocolError, decode_frame
 from server.record import SessionRecorder
@@ -111,6 +112,8 @@ def make_localizer(settings: Settings, detector=None):
             # Mask people and furniture out of the pano reference views with the live detector.
             kwargs["ref_detector"] = detector.detect
             kwargs["ref_detector_id"] = f"{settings.yolo_model}@{settings.yolo_conf}"
+        if "places" in parameters and settings.candidate_places not in ("1", ""):
+            kwargs["places"] = settings.candidate_places
         return factory(**kwargs)
     except ModuleNotFoundError as exc:
         raise RuntimeError(
@@ -493,6 +496,7 @@ def create_app(
             result["indexed_scan_ids"] = info.get("scan_ids", [])
         regions = getattr(localizer, "masked_regions", None)
         result["masked_regions"] = regions() if callable(regions) else []
+        result["map"] = await asyncio.to_thread(scan_points, settings.data_dir)
         return result
 
     @app.get("/metrics")

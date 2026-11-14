@@ -13,7 +13,7 @@ CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 def test_ranking_and_footprint_panels_present():
     html = (VIEWER / "index.html").read_text()
-    for el in ("rank-list", "cmp-live", "cmp-top", "pano-map", "equirect", "footprint", "mask-layer", "mask-note"):
+    for el in ("rank-list", "cmp-live", "cmp-top", "pano-map", "equirect", "footprint", "mask-layer", "mask-note", "minimap", "mm-floor", "mm-place"):
         assert f'id="{el}"' in html, el
 
 
@@ -78,3 +78,19 @@ def test_viewer_renders_live_pano_ranking_and_footprint(server):
     assert re.search(r'id="cmp-live"[^>]*src="data:image/jpeg', dom)
     assert re.search(r'id="mask-layer".*<polygon', dom, re.S)  # ignored people/furniture drawn
     assert re.search(r'id="mask-note"[^>]*>\s*\d+ regions? ignored', dom)
+
+
+@pytest.mark.browser
+@pytest.mark.skipif(not __import__("os").path.exists(CHROME), reason="needs Chrome")
+def test_minimap_highlights_the_current_place(server):
+    r = subprocess.run(
+        [CHROME, "--headless=new", "--disable-gpu", "--no-sandbox",
+         "--virtual-time-budget=6000", "--dump-dom", server["base"] + "/?demo=1"],
+        capture_output=True, text=True, timeout=60,
+    )
+    dom = r.stdout
+    dots = re.findall(r'<circle class="mm-dot[^"]*"', dom)
+    assert len(dots) >= 4, dom[:2000]
+    assert len(re.findall(r'class="mm-dot mm-active"', dom)) == 1
+    assert re.search(r'id="mm-place"[^>]*>\s*Hallway', dom)
+    assert re.search(r'id="mm-floor"[^>]*>\s*Floor 1', dom)

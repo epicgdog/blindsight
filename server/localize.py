@@ -115,6 +115,10 @@ TOPK_DEMO = 3  # global-retrieval proposals from the locked pano (doc: top 3)
 TOPK_DEMO_BOW = 2  # extra proposals from the local-feature vocabulary
 TOPK_COMP = 3  # proposals from competing scan points (vocabulary)
 MAX_COMPETITORS = int(os.environ.get("P3_MAX_COMPETITORS", "20"))
+# Multi-place mode (every pano is a candidate place): a new place must beat the best other place by
+# this inlier ratio, and be seen on this many consecutive frames, before the reported place moves.
+MULTI_MARGIN = float(os.environ.get("P3_MULTI_MARGIN", "1.15"))
+SWITCH_FRAMES = int(os.environ.get("P3_SWITCH_FRAMES", "2"))
 MAX_ONSITE_NEG = 200  # frames from Part 1's POST /api/capture/neg used as competing views
 ONSITE_NEG = "onsite_negatives"  # place name for those frames
 COMP_YAWS = tuple(range(0, 360, 15))  # competitor views: every 15 degrees at pitch 0
@@ -524,7 +528,7 @@ class FrameEval:
     def best_comp_inliers(self) -> int:
         return max((c.inliers for c in self.cands if not c.demo), default=0)
 
-    def decide(self, s: Settings, mode: str = "geometry") -> tuple[bool, Cand | None]:
+    def decide(self, s: Settings, mode: str = "geometry", margin: float | None = None) -> tuple[bool, Cand | None]:
         if mode == "retrieval":
             t = self.top_any
             ok = t is not None and t.demo and t.sim >= s.T_HI
@@ -536,6 +540,10 @@ class FrameEval:
         comp = self.best_comp_inliers()
         if ok and comp > 0 and b.inliers < s.PLACE_RATIO * comp:
             ok = False
+        if ok and margin:  # several candidate places: the best must clearly beat the runner-up
+            other = max((c.inliers for c in self.cands if c.demo and c.place != b.place), default=0)
+            if other > 0 and b.inliers < margin * other:
+                ok = False
         return ok, b
 
     def to_json(self) -> dict:
@@ -571,7 +579,7 @@ class Localizer:
     def __init__(self, data_dir: str | Path | None = None, settings: Settings | None = None,
                  matcher=None, embedder=None, competitors="auto", mode: str = "geometry",
                  pano_id: str | None = None, ref_size: tuple[int, int] = REF_SIZE, verbose: bool = True,
-                 ref_detector=None, ref_detector_id: str = "detector"):
+                 ref_detector=None, ref_detector_id: str = "detector", places=None):
         t0 = time.perf_counter()
         self.data_dir = Path(data_dir) if data_dir else DATA_DIR
         self.s = settings or Settings.load(self.data_dir / "calibration.json")
@@ -586,6 +594,7 @@ class Localizer:
         meta = load_pano_meta(self.data_dir)
         self.pano_id = pano_id or meta["pano_id"]
         self.label = meta.get("label") or "this spot"
+        self._meta = meta
         if matcher is None:
             matcher, n = make_matcher(self.s.matcher)
             self.notes += n
@@ -600,14 +609,29 @@ class Localizer:
 
         self._refs: list[_Ref] = []
         self._load_place(self.pano_id, demo=True)
+        # places: None = one candidate place (the configured pano); "all" or N = also treat the
+        # other panos on disk (nearest N) as candidate places, so we report which one we are at.
+        competitors_arg = competitors
+        self.candidate_places: list[str] = [self.pano_id]
+        for pid in self._candidate_ids(meta, places):
+            try:
+                self._load_place(pid, demo=True)
+                self.candidate_places.append(pid)
+            except FileNotFoundError as ex:
+                self.notes.append(f"candidate place {pid} skipped: {ex}")
+        self.multi = len(self.candidate_places) > 1
+        self._place: str | None = None  # the place currently reported (multi mode)
+        self._votes: dict[str, int] = {}
         self.competitors: list[str] = []
+        if self.multi and competitors == "auto":
+            competitors = []  # every pano is a candidate already
         for cid in self._competitor_ids(meta, competitors):
             try:
                 self._load_place(cid, demo=False)
                 self.competitors.append(cid)
             except FileNotFoundError as ex:
                 self.notes.append(f"competitor {cid} skipped: {ex}")
-        if competitors == "auto" or (isinstance(competitors, (list, tuple)) and ONSITE_NEG in competitors):
+        if competitors_arg == "auto" or (isinstance(competitors, (list, tuple)) and ONSITE_NEG in competitors):
             self._load_onsite_negatives()
         self._emb = self._embed_refs([r for r in self._refs])
         self._bow = BowIndex([r.feats for r in self._refs])
@@ -626,13 +650,88 @@ class Localizer:
                 print(f"[localize] {n}", file=sys.stderr)
 
     # -- loading -------------------------------------------------------------
+    def _place_positions(self, meta: dict) -> dict[str, tuple[float, float, float]]:
+        pos: dict[str, tuple[float, float, float]] = {}
+        f = self.data_dir / "matterport" / "panoLocations.json"
+        if f.is_file():
+            try:
+                def walk(v):
+                    if isinstance(v, dict):
+                        if "id" in v and isinstance(v.get("position"), dict):
+                            p = v["position"]
+                            pos[v["id"]] = (float(p["x"]), float(p["y"]), float(p["z"]))
+                        for c in v.values():
+                            walk(c)
+                    elif isinstance(v, list):
+                        for c in v:
+                            walk(c)
+                walk(json.loads(f.read_text()))
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+        for n in meta.get("negatives", []):
+            p = n.get("position")
+            if p and n["pano_id"] not in pos:
+                pos[n["pano_id"]] = (float(p["x"]), float(p["y"]), float(p["z"]))
+        if meta.get("position") and self.pano_id not in pos:
+            p = meta["position"]
+            pos[self.pano_id] = (float(p["x"]), float(p["y"]), float(p["z"]))
+        return pos
+
+    def _candidate_ids(self, meta: dict, places) -> list[str]:
+        """Other panos on disk to treat as candidate places, nearest first."""
+        if places in (None, False, 0, "none", "1", 1):
+            return []
+        root = self.data_dir / "pano"
+        ids = [d.name for d in sorted(root.iterdir())
+               if d.is_dir() and d.name != self.pano_id and (d / "face_1.jpg").exists()]
+        if isinstance(places, (list, tuple)):
+            ids = [p for p in places if p != self.pano_id and p in ids]
+        pos = self._place_positions(meta)
+        here = np.array(pos.get(self.pano_id, (0.0, 0.0, 0.0)))
+        ids.sort(key=lambda i: float(np.linalg.norm(np.array(pos[i]) - here)) if i in pos else 1e9)
+        if isinstance(places, str) and places.isdigit():
+            places = int(places)
+        if isinstance(places, int):
+            ids = ids[: max(0, places - 1)]  # places counts the configured pano too
+        return ids
+
+    def place_label(self, pid: str) -> str:
+        """A speakable name for a place: room name, else the scan number, else the pano label."""
+        if pid == self.pano_id:
+            return self.label
+        for n in self._meta.get("negatives", []):
+            if n.get("pano_id") == pid and n.get("room"):
+                return str(n["room"])
+        f = self.data_dir / "matterport" / "panoLocations.json"
+        if f.is_file():
+            try:
+                lab = None
+
+                def walk(v):
+                    nonlocal lab
+                    if isinstance(v, dict):
+                        if v.get("id") == pid and v.get("label") is not None:
+                            lab = v["label"]
+                        for c in v.values():
+                            walk(c)
+                    elif isinstance(v, list):
+                        for c in v:
+                            walk(c)
+                walk(json.loads(f.read_text()))
+                if lab is not None:
+                    return f"scan point {lab}"
+            except (OSError, ValueError):
+                pass
+        return self.label
+
     def _competitor_ids(self, meta: dict, competitors) -> list[str]:
         if competitors in (None, "none", False, 0):
             return []
         if competitors != "auto":
-            return [c for c in competitors if c not in (self.pano_id, ONSITE_NEG)]
+            return [c for c in competitors if c not in (self.pano_id, ONSITE_NEG) and c not in self.candidate_places]
         negs = sorted(meta.get("negatives", []), key=lambda n: n.get("dist_m", 1e9))
-        ids = [n["pano_id"] for n in negs if (self.data_dir / "pano" / n["pano_id"] / "face_1.jpg").exists()]
+        ids = [n["pano_id"] for n in negs if n["pano_id"] not in self.candidate_places
+               and (self.data_dir / "pano" / n["pano_id"] / "face_1.jpg").exists()]
         return ids[:MAX_COMPETITORS]
 
     def _load_place(self, place: str, demo: bool) -> None:
@@ -723,12 +822,49 @@ class Localizer:
             pass
         return out
 
-    def _embed_refs(self, refs: list[_Ref]) -> np.ndarray:
+    def _embed_imgs(self, refs: list[_Ref]) -> np.ndarray:
         imgs = []
         for r in refs:
             img = normalize_contrast(r.view.image)
             imgs.append(blank_boxes(img, r.masks) if r.masks else img)
         return self.embedder.embed_batch(imgs)
+
+    def _embed_refs(self, refs: list[_Ref]) -> np.ndarray:
+        """Embeddings for every reference. Pano views are cached per place (embedding thousands of
+        views is slow); on-site frames and other non-pano references are embedded fresh."""
+        out: list[np.ndarray | None] = [None] * len(refs)
+        groups: dict[str, list[int]] = {}
+        for i, r in enumerate(refs):
+            if r.view.source == "pano" and r.place != ONSITE_NEG:
+                groups.setdefault(r.place, []).append(i)
+        for place, idx in groups.items():
+            group = [refs[i] for i in idx]
+            names = [r.view.name for r in group]
+            tag = mask_key(json.dumps([names, [r.masks for r in group]]), 0)
+            cache = self.data_dir / "pano" / place / "cache" / f"emb_{self.embedder.name}_{tag}.npy"
+            arr = None
+            if cache.exists():
+                try:
+                    arr = np.load(cache, allow_pickle=False)
+                    if arr.shape[0] != len(group):
+                        arr = None
+                except Exception:  # noqa: BLE001 - a bad cache is just recomputed
+                    arr = None
+            if arr is None:
+                arr = self._embed_imgs(group)
+                try:
+                    cache.parent.mkdir(parents=True, exist_ok=True)
+                    np.save(cache, arr)
+                except OSError:
+                    pass
+            for k, i in enumerate(idx):
+                out[i] = arr[k]
+        rest = [i for i, v in enumerate(out) if v is None]
+        if rest:
+            fresh = self._embed_imgs([refs[i] for i in rest])
+            for k, i in enumerate(rest):
+                out[i] = fresh[k]
+        return np.vstack(out) if out else np.zeros((0, 1), np.float32)
 
     def masked_regions(self) -> list:
         """Masked people/furniture on the demo pano as equirect polygons (for the viewer)."""
@@ -770,8 +906,9 @@ class Localizer:
 
     def _yaw_neighbor(self, yaw: float) -> int | None:
         best, bd = None, 1e9
+        place = (self._place if self.multi else None) or self.pano_id
         for i, r in enumerate(self._refs):
-            if r.demo and r.view.source == "pano" and r.view.pitch == 0:
+            if r.demo and r.view.source == "pano" and r.view.pitch == 0 and r.place == place:
                 d = ang_diff(r.view.yaw, yaw)
                 if d < bd:
                     best, bd = i, d
@@ -848,7 +985,9 @@ class Localizer:
                                      verify_cands=self.mode != "retrieval")
             if embed_now:
                 self._sims = fe.sims
-            matched, best = fe.decide(self.s, self.mode)
+            matched, best = fe.decide(self.s, self.mode, MULTI_MARGIN if self.multi else None)
+            if self.multi:
+                matched, best = self._hold_place(matched, best)
             yaw = None
             conf = 0.0
             if matched and best is not None:
@@ -860,9 +999,15 @@ class Localizer:
                     conf = min(1.0, best.inliers / (2.0 * max(1, self.s.N_MIN)))
             st = self._sm.step(matched, yaw, heading, conf)
             ref = best or fe.top_demo
+            pano_id, label = self.pano_id, self.label
+            if self.multi:
+                if st.state == LOST:
+                    self._place, self._votes = None, {}
+                pano_id = self._place or (ref.place if ref else self.pano_id)
+                label = self.place_label(pano_id)
             loc = Location(
-                pano_id=self.pano_id,
-                label=self.label,
+                pano_id=pano_id,
+                label=label,
                 state=st.state,
                 score=round(float(ref.sim), 4) if ref else 0.0,
                 inliers=int(best.inliers) if best else 0,
@@ -887,6 +1032,23 @@ class Localizer:
                 "frame_shape": list(frame_rgb.shape),
             }
             return loc
+
+    def _hold_place(self, matched: bool, best):
+        """Multi-place hysteresis: a different place must win on SWITCH_FRAMES frames in a row."""
+        if not matched or best is None:
+            self._votes = {}
+            return matched, best
+        place = best.place
+        if self._place is None or place == self._place:
+            self._place, self._votes = place, {}
+            return True, best
+        n = self._votes.get(place, 0) + 1
+        self._votes = {place: n}
+        if n >= SWITCH_FRAMES:
+            self._place, self._votes = place, {}
+            self._sm.reset()  # yaw history belongs to the old place
+            return True, best
+        return False, best  # hold the current place until the new one is confirmed
 
     def _match_view(self, fe, best, ref, yaw, shape) -> dict | None:
         """For the viewer: places ranked by retrieval score, and where the frame sits on the pano."""
@@ -970,10 +1132,12 @@ class Localizer:
             self._sm.reset()
             self._n = 0
             self._sims = None
+            self._place, self._votes = None, {}
 
     def info(self) -> dict:
         return {
             "pano_id": self.pano_id, "label": self.label, "mode": self.mode,
+            "candidate_places": self.candidate_places,
             "n_refs": int(self._is_pano_demo.sum()), "n_onsite": self.n_onsite,
             "competitors": self.competitors, "n_competitor_refs": int((~self._is_demo).sum()),
             "matcher": self.matcher.name, "retriever": self.embedder.name,
