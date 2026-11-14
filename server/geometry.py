@@ -372,7 +372,7 @@ def make_matcher(name: str = "auto") -> tuple[object, list[str]]:
             last = e
     if name != "auto":
         raise RuntimeError(f"LightGlue unavailable: {last}") from last
-    notes.append(f"LightGlue unavailable ({type(last).__name__}: {last}); fallback SIFT+FLANN")
+    notes.append(f"LightGlue unavailable ({type(last).__name__}: {last}); fallback SIFT (ratio 0.75)")
     return SiftMatcher(), notes
 
 

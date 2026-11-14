@@ -9,7 +9,7 @@ Branch `part-3` (pull request epicgdog/blindsight#2). Commits are prefixed `part
 | `.env*` git-ignored before the first commit | done (`cb2bb95`) |
 | A1: Matterport credentials | keys come from `/costar-keys` in the track Discord; they go in `.env.local` on the laptop that downloads (declined for the cloud session) |
 | Matterport quickstart | **in hand** (pasted 2026-11-14): `data/matterport/api.json` holds its endpoint, basic auth, env var names and Panos query. Pano labels are scan numbers, so the spoken name comes from `--label` |
-| Is the demo model `6sd6A5r5EVp` reachable with the hackathon keys? | **unknown**: the keys cover about 15,000 models in Houston and Los Angeles; `make -f make/part3.mk p3-access` answers it |
+| Is the demo model `6sd6A5r5EVp` reachable with the hackathon keys? | **no** (checked 2026-11-14): the key works and sees the 14,945 models of 'HackPrinceton 2026', but `model(id: "6sd6A5r5EVp")` answers not.found. Asked the CoStar track team to add it. Practice run meanwhile on the quickstart's house `zvKHR9DHNjJ` (real Matterport data, not the lobby) |
 | Code: fetch, refs, localizer, geometry, synthetic data/feed, calibrate, eval, tests | done; 41 tests pass (`make -f make/part3.mk p3-test`) |
 | Phase 3 acceptance (6 faces, contact sheet viewed, GET /api/pano) | **not met**: no pano data |
 | Phase 4 targets on the lobby (simulated set) | **not measured**: no pano data. No lobby number exists yet; the pitch must not quote any |
