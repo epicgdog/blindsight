@@ -134,7 +134,7 @@ def test_only_one_phone_and_fresh_state_on_reconnect(settings, packet):
         for _ in range(2):
             with client.websocket_connect("/ws/phone") as phone:
                 phone.send_bytes(packet())
-                assert phone.receive_json()["cue"]["text"] == "You are in the test lobby"
+                assert phone.receive_json()["cue"]["text"] == "View matches the test lobby."
                 with client.websocket_connect("/ws/phone") as other:
                     with pytest.raises(WebSocketDisconnect) as error:
                         other.receive_json()

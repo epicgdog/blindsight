@@ -42,6 +42,7 @@ class Settings:
     embed_every_n_frames: int = EMBED_EVERY_N_FRAMES
     cooldown_s: float = COOLDOWN_S
     min_gap_s: float = MIN_GAP_S
+    detailed_cues: bool = env_bool("DETAILED_CUES", True)
     record: bool = RECORD
     localizer: str = LOCALIZER
     detector: str = os.getenv("DETECTOR", "yolo")

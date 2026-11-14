@@ -130,7 +130,19 @@ class Pipeline:
         self.settings = settings
         self.detector = detector
         self.localizer = localizer
-        self.cues = CueEngine(settings.hfov_deg, settings.cooldown_s, settings.min_gap_s)
+        try:
+            landmarks = json.loads((settings.data_dir / "cue_landmarks.json").read_text())
+            if not isinstance(landmarks, list):
+                landmarks = []
+        except (OSError, ValueError):
+            landmarks = []
+        self.cues = CueEngine(
+            settings.hfov_deg,
+            settings.cooldown_s,
+            settings.min_gap_s,
+            detailed=settings.detailed_cues,
+            landmarks=landmarks,
+        )
         self.recorder = SessionRecorder(settings.data_dir / "sessions") if settings.record else None
         self.count = 0
         self.location = None
