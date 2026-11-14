@@ -74,6 +74,8 @@ def decode_image(packet: FramePacket, settings: Settings) -> tuple[np.ndarray, b
 
 def make_localizer(settings: Settings):
     module = "server.localize_stub" if settings.localizer == "stub" else "server.localize"
+    if settings.localizer == "real" and settings.localization_scope == "property":
+        module = "server.property_localize"
     try:
         factory = importlib.import_module(module).Localizer
         parameters = inspect.signature(factory).parameters
@@ -432,7 +434,14 @@ def create_app(
 
     @app.get("/healthz")
     async def health():
-        return {"status": "ok", "detector": settings.detector, "localizer": settings.localizer}
+        return {
+            "status": "ok",
+            "detector": settings.detector,
+            "localizer": settings.localizer,
+            "localization_scope": settings.localization_scope
+            if settings.localizer == "real"
+            else "stub",
+        }
 
     @app.get("/api/pano")
     async def pano():
@@ -440,6 +449,11 @@ def create_app(
         localizer = app.state.runtime.active_localizer or app.state.runtime.initial_localizer
         if localizer is not None and hasattr(localizer, "s"):
             result["thresholds"] = localizer.s.thresholds()
+        if localizer is not None and hasattr(localizer, "info"):
+            info = localizer.info()
+            result["localization_scope"] = info.get("scope", "single")
+            result["indexed_scans"] = info.get("indexed_scans", 1)
+            result["indexed_scan_ids"] = info.get("scan_ids", [])
         return result
 
     @app.get("/metrics")
@@ -470,7 +484,7 @@ def create_app(
             "localizer_mode": settings.localizer,
             "location": latest.result["location"] if latest else None,
             "diagnostics": latest.result.get("localization_debug", {}) if latest else {},
-            "selected_scan_only": True,
+            "selected_scan_only": settings.localization_scope != "property",
         }
 
     @app.post("/api/speech")

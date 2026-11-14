@@ -45,6 +45,7 @@ class Settings:
     detailed_cues: bool = env_bool("DETAILED_CUES", True)
     record: bool = RECORD
     localizer: str = LOCALIZER
+    localization_scope: str = os.getenv("LOCALIZATION_SCOPE", "property")
     detector: str = os.getenv("DETECTOR", "yolo")
     yolo_device: str = os.getenv("YOLO_DEVICE", "auto")
     yolo_model: str = os.getenv("YOLO_MODEL", "yolo11n.pt")
@@ -63,6 +64,8 @@ class Settings:
     send_timeout_s: float = 2.0
 
     def __post_init__(self):
+        if self.localization_scope not in {"property", "single"}:
+            raise ValueError("LOCALIZATION_SCOPE must be property or single")
         if not all(
             math.isfinite(v)
             for v in (
