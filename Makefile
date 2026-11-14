@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 UV ?= uv
 CORE_FILES := server/__init__.py server/config.py server/protocol.py server/server.py \
+ server/navigation.py server/tests/test_navigation.py \
 	server/cues.py server/detect.py server/record.py server/localize_stub.py tools/sim_client.py \
 	server/tests/conftest.py server/tests/test_cues.py server/tests/test_detect.py \
 	server/tests/test_protocol.py server/tests/test_record_and_checks.py server/tests/test_server.py

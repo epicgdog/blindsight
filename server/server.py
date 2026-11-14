@@ -38,6 +38,7 @@ if __package__ in {None, ""}:
 from server.config import Settings
 from server.cues import CueEngine, describe
 from server.detect import Detector, StubDetector
+from server.navigation import navigation_router
 from server.protocol import FramePacket, ProtocolError, decode_frame
 from server.record import SessionRecorder
 
@@ -399,6 +400,7 @@ def create_app(
             executor.shutdown(wait=True, cancel_futures=True)
 
     app = FastAPI(title="Blindsight", lifespan=lifespan)
+    app.include_router(navigation_router(settings.data_dir))
 
     @app.get("/")
     async def index():
