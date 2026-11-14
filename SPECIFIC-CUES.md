@@ -35,3 +35,30 @@ simulated report also had 1 false lock in 20 negative walkthroughs. That is sepa
 from narration detail and needs localization tuning/validation before trusting a
 match as an exact current location. Prior successful reports from other configs do
 not override this deployed report. No live phone accuracy or latency was measured.
+
+## More descriptive cues (detailed mode)
+
+All of this is detailed mode only; `DETAILED_CUES=0` keeps the old phrasing exactly.
+
+- More things are named. Extra obstacles: bed, toilet, dog, cat, umbrella, bag, fire
+  hydrant. Things that say what kind of place this is, never urgent, lowest priority,
+  each named at most every 30 s: laptop, fridge, sink, microwave, oven, clock, stop sign,
+  traffic light. Small items YOLO often mislabels (cup, bottle, book, phone) stay silent.
+- Several far things in one sentence (up to 3): "2 people at 1 o'clock and a bench at
+  11 o'clock." Close and urgent warnings are still said alone and first.
+- "Getting closer": a box that grows by 40% within about a second, and is not cut off
+  by the image edge, gives "Person directly ahead, getting closer." at the priority of a
+  close object. It says the gap is shrinking, not who is moving, and no distance.
+- Arrival says what is in view: "View matches the hallway. In view: 2 people and a
+  bench." Those are not repeated one by one straight after.
+- No cue is sent while the phone is probably still speaking the last one (estimated at
+  2.5 words per second). The phone drops a cue that arrives mid-speech, so longer cues
+  would otherwise lose the next one. Urgent "Stop." warnings still interrupt at once.
+
+To hear the difference on a real walk without walking again: run the server with
+`RECORD=1`, walk with the phone, then on any laptop (no YOLO or torch needed):
+
+    uv run --no-project python -m server.cue_replay                 # newest data/sessions/*
+    uv run --no-project python -m server.cue_replay data/sessions/<stamp>
+
+It prints every cue with its time, old wording ("before") next to the new ("now").
