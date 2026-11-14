@@ -38,9 +38,14 @@ if [[ -z "$URL" ]]; then
 fi
 
 echo "EXPO_PUBLIC_SERVER_URL=${URL}"
-if command -v uv >/dev/null 2>&1; then
+if [[ -x "$ROOT/.venv/bin/python" ]]; then
+  "$ROOT/.venv/bin/python" -c "import qrcode,sys; q=qrcode.QRCode(border=1); q.add_data(sys.argv[1]); q.print_ascii(invert=True)" "$URL" \
+    || echo "(QR unavailable; run make setup)" >&2
+elif command -v uv >/dev/null 2>&1; then
   (cd "$ROOT" && uv run python3 -c "import qrcode,sys; q=qrcode.QRCode(border=1); q.add_data(sys.argv[1]); q.print_ascii(invert=True)" "$URL") 2>/dev/null \
     || echo "(QR unavailable; type the address into the app)" >&2
+else
+  echo "(QR unavailable; run make setup)" >&2
 fi
 
 if [[ $DRY -eq 1 || -n "${BLINDSIGHT_NO_EXPO:-}" ]]; then exit 0; fi

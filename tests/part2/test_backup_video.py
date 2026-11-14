@@ -1,5 +1,6 @@
 """tools/render_backup_video.py produces a labeled, ~N second mp4."""
 import json
+import shutil
 import subprocess
 import sys
 
@@ -12,6 +13,7 @@ CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 @pytest.mark.browser
 @pytest.mark.skipif(not __import__("os").path.exists(CHROME), reason="needs Chrome")
+@pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="needs ffmpeg and ffprobe")
 def test_renders_short_labeled_video(tmp_path):
     out = tmp_path / "backup.mp4"
     r = subprocess.run(

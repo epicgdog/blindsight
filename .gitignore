@@ -16,3 +16,4 @@ node_modules/
 .expo/
 dist/
 slides/backup.mp4
+data/

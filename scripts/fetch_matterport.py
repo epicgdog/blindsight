@@ -50,10 +50,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
 from refs import check_pano  # noqa: E402
 
-# Default model: Princeton - Rabinowitz Hall (66 scan points, two floors), the Princeton
-# model the hackathon key can see. The doc's lobby model 6sd6A5r5EVp answers not.found
-# with the hackathon key (checked 2026-11-14). --model overrides.
-MODEL_ID = "P3S6VUTP3qB"
+# Exact property selected by the user. Do not silently substitute another space
+# when API credentials cannot access this model. --model is an explicit override.
+MODEL_ID = "6sd6A5r5EVp"
 DATA = ROOT / "data"
 MP_DIR = DATA / "matterport"
 PANO_DIR = DATA / "pano"

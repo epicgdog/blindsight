@@ -53,9 +53,11 @@ def test_prints_qr(tmp_path):
     assert "█" in r.stdout + r.stderr or "▄" in r.stdout + r.stderr
 
 
-def test_never_prints_secrets(tmp_path):
+def test_never_prints_secrets(tmp_path, monkeypatch):
+    monkeypatch.setenv("MATTERPORT_API_TOKEN", "blindsight-test-secret-do-not-print")
     b = fake_bin(tmp_path, "exit 1\n")
     r = run(tmp_path, b, "--dry-run")
-    secrets = [v.split("=", 1)[1] for v in (ROOT / ".env.local").read_text().split() if "=" in v]
+    # Exercise a known sentinel, never require or read the developer's credentials.
+    secrets = ["blindsight-test-secret-do-not-print"]
     for s in filter(None, secrets):
         assert s not in r.stdout + r.stderr
