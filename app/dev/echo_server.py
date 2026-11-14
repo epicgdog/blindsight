@@ -46,6 +46,16 @@ def result(seq: int, n: int, ms: float = 1.0) -> dict:
         "location": {"pano_id": "6sd6A5r5EVp-demo", "label": PANO_LABEL, "score": 0.82, "ema": 0.8,
                      "best_ref": 2, "state": "LOCKED", "inliers": 57, "yaw_deg": 12.0, "yaw_conf": 0.9},
         "cue": cue,
+        "match": {
+            "ranking": [
+                {"place": "6sd6A5r5EVp-demo", "sim": 0.91, "ref": 12, "inliers": 57},
+                {"place": "echo-neighbour-1", "sim": 0.64, "ref": 140, "inliers": 6},
+                {"place": "echo-neighbour-2", "sim": 0.52, "ref": 201, "inliers": 2},
+                {"place": "echo-neighbour-3", "sim": 0.41, "ref": 305, "inliers": 0},
+            ],
+            "footprint": [[0.2, 0.3], [0.25, 0.3], [0.3, 0.3], [0.3, 0.5], [0.3, 0.7],
+                          [0.25, 0.7], [0.2, 0.7], [0.2, 0.5]],
+        },
     }
 
 
@@ -108,7 +118,11 @@ async def ws_viewer(ws: WebSocket):
 
 @app.get("/api/pano")
 def pano():
-    return {"label": PANO_LABEL, "faces": [f"/pano/face_{i}.jpg" for i in range(6)],
+    return {"label": PANO_LABEL, "places": {
+        "6sd6A5r5EVp-demo": {"room": "Hallway", "label": "0"},
+        "echo-neighbour-1": {"room": "Other / Hallway", "label": "34"},
+        "echo-neighbour-2": {"room": "Stairwell", "label": "12"},
+    }, "faces": [f"/pano/face_{i}.jpg" for i in range(6)],
             "thresholds": {"locked": 0.7, "uncertain": 0.4}}
 
 

@@ -136,7 +136,7 @@ def main():
         with connect(target["webSocketDebuggerUrl"], max_size=None) as cws, connect(ws_base + "/ws/phone") as phone:
             cdp = Cdp(cws)
             cdp.call("Page.enable")
-            cdp.call("Emulation.setDeviceMetricsOverride", width=1280, height=720, deviceScaleFactor=1, mobile=False)
+            cdp.call("Emulation.setDeviceMetricsOverride", width=1280, height=1000, deviceScaleFactor=1, mobile=False)
             cdp.call("Page.navigate", url=http_base + "/")
             time.sleep(1.5)
             cdp.call("Runtime.evaluate", expression=(

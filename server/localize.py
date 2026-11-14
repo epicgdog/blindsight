@@ -49,6 +49,7 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from matchviz import footprint_polygon, rank_places  # noqa: E402
 from geometry import (  # noqa: E402
     Features,
     ang_diff,
@@ -837,6 +838,7 @@ class Localizer:
                 best_ref=ref.name if ref else None,
             )
             self.last_debug = {
+                "match": self._match_view(fe, best, ref, st.yaw, frame_rgb.shape),
                 "matched": matched, "embed": round(fe.embed_ms, 1), "extract": round(fe.extract_ms, 1),
                 "verify": round(fe.verify_ms, 1), "total": round((time.perf_counter() - t0) * 1000, 1),
                 "candidates": [(c.name, c.place, c.inliers, c.grid) for c in fe.cands],
@@ -844,6 +846,29 @@ class Localizer:
                 "embedded": embed_now,
             }
             return loc
+
+    def _match_view(self, fe, best, ref, yaw, shape) -> dict | None:
+        """For the viewer: places ranked by retrieval score, and where the frame sits on the pano."""
+        try:
+            sims = fe.sims
+            if sims is None:
+                return None
+            places = [r.place for r in self._refs][: len(sims)]
+            inl: dict[str, int] = {}
+            for c in fe.cands:
+                inl[c.place] = max(inl.get(c.place, 0), int(c.inliers))
+            ranking = rank_places(np.asarray(sims)[: len(places)], places, top=8, inliers=inl)
+            footprint = None
+            if best is not None and best.yaw is not None:
+                h, w = shape[:2]
+                pitch = best.pitch if best.pitch is not None else 0.0
+                roll = best.roll if best.roll is not None else 0.0
+                footprint = footprint_polygon(
+                    yaw if yaw is not None else best.yaw, pitch, roll, self.s.HFOV_DEG, h / max(1, w)
+                )
+            return {"ranking": ranking, "footprint": footprint}
+        except Exception:  # visualisation must never break localization
+            return None
 
     def add_reference(self, frame_rgb) -> bool:
         """Warm-up: verify the frame against the pano views (not against other on-site

@@ -184,6 +184,7 @@ class Pipeline:
             "location": self.location.to_dict(),
             "cue": asdict(cue) if cue else None,
             "mode": {"detector": self.settings.detector, "localizer": self.settings.localizer},
+            "match": getattr(self.localizer, "last_debug", {}).get("match"),
         }
         # Fail closed on a broken plugin result (e.g. NaN), before sending JSON or recording.
         json.dumps(result, allow_nan=False)
@@ -365,9 +366,16 @@ def pano_metadata(settings: Settings) -> dict:
                     }
                     for ref in json.loads(manifest.read_text())["refs"]
                 ]
+    places = {}
+    if chosen.get("pano_id"):
+        places[chosen["pano_id"]] = {"room": chosen.get("room"), "label": chosen.get("scan_label")}
+    for neg in chosen.get("negatives") or []:
+        if isinstance(neg, dict) and neg.get("pano_id"):
+            places[neg["pano_id"]] = {"room": neg.get("room"), "label": neg.get("label")}
     return {
         "pano_id": pano_id,
         "label": label,
+        "places": places,
         "faces": faces,
         "face_urls": faces,
         "thresholds": calibration,

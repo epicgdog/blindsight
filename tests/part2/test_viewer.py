@@ -11,6 +11,12 @@ VIEWER = ROOT / "server/viewer"
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 
+def test_ranking_and_footprint_panels_present():
+    html = (VIEWER / "index.html").read_text()
+    for el in ("rank-list", "cmp-live", "cmp-top", "pano-map", "equirect", "footprint"):
+        assert f'id="{el}"' in html, el
+
+
 def test_files_exist():
     for f in ("index.html", "app.js", "style.css", "logic.js"):
         assert (VIEWER / f).is_file(), f
@@ -51,3 +57,22 @@ def test_viewer_renders_live_state_in_headless_chrome(server):
     assert re.search(r'id="state-badge"[^>]*>\s*LOCKED', dom), dom[:2000]
     assert re.search(r'id="cue-log".*main lobby', dom, re.S | re.I)
     assert re.search(r'id="inliers"[^>]*>[^<]*\d', dom)
+
+
+@pytest.mark.browser
+@pytest.mark.skipif(not __import__("os").path.exists(CHROME), reason="needs Chrome")
+def test_viewer_renders_live_pano_ranking_and_footprint(server):
+    """Echo server pushes a canned match; the viewer must rank places and draw the box."""
+    r = subprocess.run(
+        [CHROME, "--headless=new", "--disable-gpu", "--no-sandbox",
+         "--virtual-time-budget=6000", "--dump-dom", server["base"] + "/?demo=1"],
+        capture_output=True, text=True, timeout=60,
+    )
+    dom = r.stdout
+    rows = re.findall(r'class="rank-row[^"]*"', dom)
+    assert len(rows) >= 3, dom[:3000]
+    assert 'rank-row here' in dom  # the locked pano is marked
+    names = re.findall(r'class="rank-name"[^>]*>([^<]+)<', dom)
+    assert names[0] == "Hallway" and "Other / Hallway" in names
+    assert re.search(r'id="footprint".*<polygon', dom, re.S)
+    assert re.search(r'id="cmp-live"[^>]*src="data:image/jpeg', dom)
