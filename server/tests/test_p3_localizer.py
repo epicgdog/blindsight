@@ -305,3 +305,34 @@ def test_embeddings_are_cached_per_place(data):
     calls.clear()
     Localizer(data, **kw)
     assert sum(calls) < first, "second start must reuse cached reference embeddings"
+
+
+# ---- IMU pitch gate: a match must agree with the phone's measured tilt ---------------------
+
+
+def test_correct_imu_pitch_still_locks(loc, room):
+    loc.reset()
+    states = []
+    for i in range(6):
+        gt = 200 + 6 * i
+        out = loc.update(frame(room, "room_p0", gt), [], (gt + 77.0) % 360, pitch_deg=0.0, roll_deg=0.0)
+        states.append(out.state)
+    assert LOCKED in states
+
+
+def test_match_that_disagrees_with_imu_pitch_is_rejected(loc, room):
+    loc.reset()
+    states = []
+    for i in range(6):
+        gt = 200 + 6 * i
+        # the image is level (pitch 0) but the phone claims it points 40 degrees down
+        out = loc.update(frame(room, "room_p0", gt), [], (gt + 77.0) % 360, pitch_deg=-40.0, roll_deg=0.0)
+        states.append(out.state)
+    assert LOCKED not in states
+    assert loc.last_debug["imu_rejected"] is True
+
+
+def test_no_imu_means_no_gate(loc, room):
+    loc.reset()
+    loc.update(frame(room, "room_p0", 200), [], 277.0)
+    assert loc.last_debug["imu_rejected"] is False

@@ -65,3 +65,17 @@ test("onFrame reports when each frame's capture started", async () => {
   assert.deepEqual(frames.map((f) => f.seq), [1, 2, 3]);
   assert.ok(frames.every((f) => Number.isFinite(f.captureStartMs)));
 });
+
+test("headers carry pitch and roll when an attitude is available", async () => {
+  const headers = []; let running = true;
+  await runCaptureLoop({
+    isRunning: () => running,
+    capture: async () => ({ bytes: new Uint8Array([1]), w: 1, h: 1 }),
+    send: async (_b, h) => { headers.push(h); if (headers.length === 2) running = false; },
+    getHeading: () => 10,
+    getAttitude: () => (headers.length === 0 ? { pitch_deg: -5, roll_deg: 1.5 } : null),
+  });
+  assert.equal(headers[0].pitch_deg, -5);
+  assert.equal(headers[0].roll_deg, 1.5);
+  assert.ok(!("pitch_deg" in headers[1]), "no attitude, no keys");
+});

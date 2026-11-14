@@ -6,6 +6,7 @@ import { setAudioModeAsync } from "expo-audio";
 import * as Location from "expo-location";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
+import { Accelerometer } from "expo-sensors";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient } from "./src/client";
 import { createCueSpeaker } from "./src/speech";
@@ -15,6 +16,7 @@ import { normalizeServerUrl } from "./src/address";
 import { base64ToBytes } from "./src/base64";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { AUDIO_MODE, speechOptions } from "./src/audio";
+import { attitudeFromGravity, smoothGravity } from "./src/attitude";
 import { ackBody, createAckTracker, sendAck, speechAckUrl } from "./src/ack";
 import { PICTURE_OPTIONS, PICTURE_SIZE, SAVE_OPTIONS, resizePlan } from "./src/camera";
 
@@ -35,6 +37,8 @@ export default function App() {
   const frames = useRef([]);
   const sizeLogged = useRef(false);
   const ackUrl = useRef(null);
+  const attitude = useRef(null);
+  const [pitch, setPitch] = useState(null);
   const ackTracker = useRef(createAckTracker());
 
   useEffect(() => {
@@ -50,6 +54,22 @@ export default function App() {
         });
       }
     })().catch((e) => console.log("init", e?.message));
+  }, []);
+
+  // Camera pitch and roll from gravity, sent with every frame so the server can check matches.
+  useEffect(() => {
+    let sub = null, gravity = null, last = 0, cancelled = false;
+    (async () => {
+      if (!(await Accelerometer.isAvailableAsync()) || cancelled) return;
+      Accelerometer.setUpdateInterval(100);
+      sub = Accelerometer.addListener((g) => {
+        gravity = smoothGravity(gravity, g);
+        attitude.current = attitudeFromGravity(gravity);
+        const now = Date.now();
+        if (now - last > 500 && attitude.current) { last = now; setPitch(attitude.current.pitch_deg); }
+      });
+    })().catch((e) => console.log("accelerometer", e?.message));
+    return () => { cancelled = true; sub?.remove(); };
   }, []);
 
   const speaker = useRef(
@@ -112,6 +132,7 @@ export default function App() {
       },
       getHeading: () => heading.current,
       onFrame: ({ seq, captureStartMs }) => ackTracker.current.noteFrame(seq, captureStartMs),
+      getAttitude: () => attitude.current,
       onTiming: (t) => { if (t.slow) console.log(`slow capture ${t.captureMs} ms: lower quality/size`); },
     });
   }, [address, perm, askPerm, speaker]);
@@ -129,7 +150,7 @@ export default function App() {
         placeholder="server address (wss://… or LAN ip:8000)" placeholderTextColor="#888" />
       <Button title={running ? "Stop" : "Start"} onPress={running ? stop : start} />
       <Text style={s.status}>
-        {status.connected ? "connected" : "disconnected"} · {status.state ?? "–"} · {fps.toFixed(1)} fps
+        {status.connected ? "connected" : "disconnected"} · {status.state ?? "–"} · {fps.toFixed(1)} fps · pitch {pitch == null ? "–" : `${Math.round(pitch)}°`}
       </Text>
       <CameraView ref={camera} style={s.preview} facing="back" pictureSize={PICTURE_SIZE} />
     </View>

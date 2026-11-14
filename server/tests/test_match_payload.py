@@ -202,3 +202,38 @@ def test_api_pano_includes_the_minimap_data(settings):
     assert pano["map"]["points"][0]["id"] == "a"
     assert pano["map"]["floors"][0]["count"] == 1
     assert pano["map"]["bounds"]["min_x"] == 1
+
+
+# ---- the phone's pitch and roll reach the localizer ----------------------------------------
+
+
+class AttitudeLocalizer(RankedLocalizer):
+    seen: list = []
+
+    def update(self, frame_rgb, detections, heading_deg, pitch_deg=None, roll_deg=None):
+        type(self).seen.append((heading_deg, pitch_deg, roll_deg))
+        return super().update(frame_rgb, detections, heading_deg)
+
+
+def test_pitch_and_roll_from_the_header_are_passed_to_the_localizer(settings, jpeg):
+    from server.protocol import FrameHeader, encode_frame
+
+    AttitudeLocalizer.seen = []
+    with TestClient(create_app(settings, localizer_factory=AttitudeLocalizer)) as client:
+        with client.websocket_connect("/ws/phone") as phone:
+            phone.send_bytes(
+                encode_frame(FrameHeader(1, 1.0, 45.0, 48, 64, pitch_deg=-8.0, roll_deg=2.0), jpeg)
+            )
+            phone.receive_json()
+    assert AttitudeLocalizer.seen == [(45.0, -8.0, 2.0)]
+
+
+def test_localizers_without_attitude_support_still_work(settings, jpeg):
+    from server.protocol import FrameHeader, encode_frame
+
+    with TestClient(create_app(settings, localizer_factory=RankedLocalizer)) as client:
+        with client.websocket_connect("/ws/phone") as phone:
+            phone.send_bytes(
+                encode_frame(FrameHeader(1, 1.0, 45.0, 48, 64, pitch_deg=-8.0, roll_deg=2.0), jpeg)
+            )
+            assert phone.receive_json()["location"]["state"] == "LOCKED"
