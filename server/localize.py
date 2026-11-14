@@ -1158,9 +1158,9 @@ class Localizer:
             footprint = None
             if top is not None:
                 h, w = shape[:2]
-                use_track = best is not None and top.place == best.place and yaw is not None
+                # This frame's own camera pose from that view (not the smoothed, tracked yaw).
                 footprint = footprint_polygon(
-                    yaw if use_track else top.yaw, top.pitch or 0.0, top.roll or 0.0,
+                    top.yaw, top.pitch or 0.0, top.roll or 0.0,
                     self.s.HFOV_DEG, h / max(1, w)
                 )
             out = {"ranking": ranking, "footprint": footprint,
