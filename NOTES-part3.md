@@ -7,34 +7,24 @@ Branch `part-3` (pull request epicgdog/blindsight#2). Commits are prefixed `part
 | Item | State |
 |---|---|
 | `.env*` git-ignored before the first commit | done (`cb2bb95`) |
-| A1: Matterport credentials in `.env.local` | **missing, blocked**. The doc says stop here, so Phase 3 has not started against real data |
-| Matterport quickstart | **unreadable from the build container**: `betaapp.matterport.com`, `beta-app.matterport.com`, `my.matterport.com` and `api.matterport.com` all return 403 from the network policy |
+| A1: Matterport credentials | keys come from `/costar-keys` in the track Discord; they go in `.env.local` on the laptop that downloads (declined for the cloud session) |
+| Matterport quickstart | **in hand** (pasted 2026-11-14): `data/matterport/api.json` holds its endpoint, basic auth, env var names and Panos query. Pano labels are scan numbers, so the spoken name comes from `--label` |
+| Is the demo model `6sd6A5r5EVp` reachable with the hackathon keys? | **unknown**: the keys cover about 15,000 models in Houston and Los Angeles; `make -f make/part3.mk p3-access` answers it |
 | Code: fetch, refs, localizer, geometry, synthetic data/feed, calibrate, eval, tests | done; 41 tests pass (`make -f make/part3.mk p3-test`) |
 | Phase 3 acceptance (6 faces, contact sheet viewed, GET /api/pano) | **not met**: no pano data |
 | Phase 4 targets on the lobby (simulated set) | **not measured**: no pano data. No lobby number exists yet; the pitch must not quote any |
 | Pipeline validated end to end | yes, on a procedural test room: all Phase 4 targets pass there in the deployed config, stress test fails (see below); not the lobby |
 
-### What unblocks Part 3 (A1, about 2 minutes, plus one paste)
+### What unblocks Part 3
 
-1. Create `.env.local` in the repo root with the credential variables the quickstart names (it is git-ignored).
-2. Fill `data/matterport/api.json` from the quickstart, using `data/matterport/api.example.json` as the template (endpoint, auth scheme, env var names, the panoLocations query, where face URLs live). Or paste the quickstart text to the Part 3 agent so it can fill it. Nothing there is guessed, as the doc requires.
-3. On the demo laptop, on good internet:
+On the laptop that will run the demo, in the repo folder:
 
-```bash
-make -f make/part3.mk p3-weights
-```
+1. Create `.env.local` (git-ignored) with two lines, `MATTERPORT_API_KEY=...` and `MATTERPORT_API_TOKEN=...`, values from `/costar-keys` in the track Discord.
+2. `make -f make/part3.mk p3-access`: checks the key and whether it can see `6sd6A5r5EVp`. If not, ask the CoStar track team (#costar-group) how to reach the HackPrinceton lobby model, or fall back to `--import-faces`.
+3. `make -f make/part3.mk p3-fetch LABEL="the main lobby"`, then look at `data/matterport/topdown.png`, `data/pano/<PANO_ID>/contact_cross.jpg` and `horizon.jpg` (text must read forwards, faces upright and continuous).
+4. `make -f make/part3.mk p3-all` builds the reference views, the simulated set, the calibration, and writes the held-out results into the "Phase 4 results" section at the end of this file.
 
-```bash
-make -f make/part3.mk p3-fetch
-```
-
-Then look at `data/matterport/topdown.png`, `data/pano/<PANO_ID>/contact_cross.jpg` and `horizon.jpg` (text must read correctly, faces upright and continuous), and run:
-
-```bash
-make -f make/part3.mk p3-all
-```
-
-That builds the reference views, the simulated set, the calibration, and writes the held-out results into the "Phase 4 results" section at the end of this file.
+Matterport imagery is git-ignored (public repo); each machine downloads its own copy with its own key.
 
 ## How the localizer decides (as built)
 
