@@ -139,7 +139,7 @@ Other measurements on the room:
 ## Phase 4 results (tools/eval_localization.py)
 
 <!-- p3-eval:begin -->
-Run 2026-11-14T15:02:20+00:00, model `P3S6VUTP3qB`, pano `az0h181td1h01x8x9gxhnp47a` (Rabinowitz Hall). **SIMULATED data, held-out test split.**
+Run 2026-11-14T16:47:02+00:00, model `P3S6VUTP3qB`, pano `az0h181td1h01x8x9gxhnp47a` (Rabinowitz Hall). **SIMULATED data, held-out test split.**
 Config: matcher `sift`, retriever `classic-hog`, N_MIN 30, PLACE_RATIO 1.0, T_LO 0.847, T_HI 0.9342, LOCK_NEED 2, HFOV 55.0, competing places 20.
 
 | Metric | Target | Measured (test split) | Pass |
@@ -151,7 +151,7 @@ Config: matcher `sift`, retriever `classic-hog`, N_MIN 30, PLACE_RATIO 1.0, T_LO
 | Latency per candidate (verify + share of extraction, p95) | < 150 ms | 36 ms | PASS |
 | False LOCKED in negative walkthroughs | 0 of 20 | 0 of 20 | PASS |
 | LOCKED within 2 s | 20 of 20 | 20 of 20 | PASS |
-| Overall localization rate (update(), this machine) | >= 2 Hz | 8.5 Hz | PASS |
+| Overall localization rate (update(), this machine) | >= 2 Hz | 8.2 Hz | PASS |
 
 Per frame: 100/100 positives matched, 0/100 negatives falsely matched (precision 100.00%).
 Ablation, per frame false-match rate: retrieval alone 1.00% (1/100) vs with geometry 0.00% (0/100).
