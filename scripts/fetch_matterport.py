@@ -66,7 +66,8 @@ EXIT_NO_API_CONFIG = 2
 
 
 # ---------------------------------------------------------------- config / credentials
-def load_env_file(path: Path = ENV_FILE) -> dict[str, str]:
+def load_env_file(path: Path | None = None) -> dict[str, str]:
+    path = ENV_FILE if path is None else path
     """KEY=VALUE lines from .env.local. Values are returned, never printed."""
     env: dict[str, str] = {}
     if not path.exists():
