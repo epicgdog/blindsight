@@ -2,6 +2,7 @@
 
 import math
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +25,11 @@ EMBED_EVERY_N_FRAMES = int(os.getenv("EMBED_EVERY_N_FRAMES", "3"))
 COOLDOWN_S = float(os.getenv("COOLDOWN_S", "5"))
 MIN_GAP_S = float(os.getenv("MIN_GAP_S", "1.5"))
 RECORD = env_bool("RECORD")
+# Demo Matterport model (Princeton - Rabinowitz Hall) and its start pano (label "0").
+MATTERPORT_MODEL_ID = os.getenv("MATTERPORT_MODEL_ID", "P3S6VUTP3qB")
+# Last-resort fallbacks: PANO_ID/PANO_LABEL, Part 3's pano.json and downloaded data win over these.
+DEFAULT_PANO_ID = "1k478kza39tbfu1uhbttg5ybb"
+DEFAULT_PANO_LABEL = "Rabinowitz Hall"
 LOCALIZER = os.getenv("LOCALIZER", "stub")
 
 
@@ -44,6 +50,9 @@ class Settings:
     allow_model_download: bool = env_bool("ALLOW_MODEL_DOWNLOAD")
     data_dir: Path = Path(os.getenv("DATA_DIR", str(ROOT / "data"))).resolve()
     viewer_dir: Path = ROOT / "server" / "viewer"
+    matterport_model_id: str = MATTERPORT_MODEL_ID
+    default_pano_id: str = DEFAULT_PANO_ID
+    default_pano_label: str = DEFAULT_PANO_LABEL
     pano_id: str | None = os.getenv("PANO_ID") or None
     pano_label: str | None = os.getenv("PANO_LABEL") or None
     max_message_bytes: int = 4 * 1024 * 1024
@@ -80,8 +89,11 @@ class Settings:
             raise ValueError("Invalid viewer frequency or port")
         if self.metrics_window_s <= 0 or self.send_timeout_s <= 0:
             raise ValueError("Metrics window and send timeout must be positive")
-        if self.pano_id and (
-            self.pano_id in {".", ".."} or Path(self.pano_id).name != self.pano_id
+        if not re.fullmatch(r"[A-Za-z0-9]{6,32}", self.matterport_model_id):
+            raise ValueError("MATTERPORT_MODEL_ID must be 6-32 letters or digits")
+        if any(
+            p and (p in {".", ".."} or Path(p).name != p)
+            for p in (self.pano_id, self.default_pano_id)
         ):
             raise ValueError("PANO_ID must be a directory name, not a path")
 
