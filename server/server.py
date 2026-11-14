@@ -72,6 +72,15 @@ def decode_image(packet: FramePacket, settings: Settings) -> tuple[np.ndarray, b
         raise ProtocolError("Unable to decode JPEG safely") from exc
 
 
+def make_detector(settings: Settings):
+    """DETECTOR=onnx runs YOLO through OpenCV, for machines without PyTorch (Intel Macs)."""
+    if settings.detector == "onnx":
+        from server.detect_onnx import OnnxDetector
+
+        return OnnxDetector(settings)
+    return Detector(settings)
+
+
 def make_localizer(settings: Settings):
     module = "server.localize_stub" if settings.localizer == "stub" else "server.localize"
     if settings.localizer == "real" and settings.localization_scope == "property":
@@ -398,7 +407,7 @@ def create_app(
             actual_detector = detector
             if actual_detector is None:
                 factory = (
-                    StubDetector if settings.detector == "stub" else lambda: Detector(settings)
+                    StubDetector if settings.detector == "stub" else lambda: make_detector(settings)
                 )
                 actual_detector = await asyncio.get_running_loop().run_in_executor(
                     executor, factory
@@ -696,7 +705,7 @@ def create_app(
 def self_check(settings: Settings) -> bool:
     checks = {}
     try:
-        Detector(settings)
+        make_detector(settings)
         checks["YOLO cached weights and inference"] = True
     except Exception as exc:
         print(f"  {exc}")

@@ -81,8 +81,8 @@ class Settings:
             raise ValueError("Numeric configuration must be finite")
         if self.localizer not in {"stub", "real"}:
             raise ValueError("LOCALIZER must be stub or real")
-        if self.detector not in {"stub", "yolo"}:
-            raise ValueError("DETECTOR must be stub or yolo")
+        if self.detector not in {"stub", "yolo", "onnx"}:
+            raise ValueError("DETECTOR must be stub, yolo or onnx")
         if not 0 < self.hfov_deg < 180 or not 0 <= self.yolo_conf <= 1:
             raise ValueError("Invalid field of view or confidence")
         if self.embed_every_n_frames < 1 or self.yolo_imgsz < 32:

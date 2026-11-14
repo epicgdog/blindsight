@@ -42,6 +42,8 @@ open http://localhost:8000
 
 On the phone: install **Expo Go**, scan the QR that Expo prints, then tap **Allow** for camera, location and speech. The server address is already filled in. Tap **Start**, and raise the volume.
 
+**Intel Mac (no PyTorch build):** `make server` fails there. Put `yolo11n.onnx` (YOLO exported to ONNX on any machine with PyTorch: `yolo export model=yolo11n.pt format=onnx imgsz=640 opset=12 simplify=True`) in `data/models/`, then `RECORD=1 make -f make/part3.mk p3-server-lite`. It runs the same server with `DETECTOR=onnx` (YOLO through OpenCV, same boxes as Ultralytics on that file) and the localizer's weight-free fallbacks (SIFT, HOG) instead of LightGlue and DINOv2. `make -f make/part3.mk p3-onnx-check IMAGE=photo.jpg` lists what it detects.
+
 ## Commands
 
 | Command | What it does |

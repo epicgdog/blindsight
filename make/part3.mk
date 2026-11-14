@@ -14,7 +14,7 @@ P3_PY      ?= uv run --no-project $(P3_DEPS) python
 P3_PY_ML   ?= uv run --no-project $(P3_DEPS) $(P3_ML_DEPS) python
 
 .PHONY: p3-help p3-access p3-list p3-fetch p3-try p3-hfov p3-refs p3-synth p3-calibrate p3-eval p3-feed p3-video \
-        p3-weights p3-test p3-selfcheck p3-all p3-check p3-places-test
+        p3-weights p3-test p3-selfcheck p3-all p3-check p3-places-test p3-server-lite p3-onnx-check
 
 p3-help: ## list the Part 3 targets
 	@grep -E '^p3-[a-z-]+:.*## ' $(lastword $(MAKEFILE_LIST)) | sed 's/:.*## /\t/'
@@ -54,6 +54,15 @@ p3-try: ## run the localizer on real photos: DIR=~/Desktop/at_spot (JPEG/PNG; iP
 
 p3-places-test: ## which scan each phone photo is recognised as: DIR=... (subfolders like 34_front_door; elsewhere/)
 	$(P3_PY) -m server.property_localize --try "$(DIR)"
+
+# The whole server without PyTorch (Intel Macs): YOLO through OpenCV from an ONNX export.
+P3_SERVER_DEPS := $(P3_DEPS) --with fastapi --with "uvicorn[standard]" --with websockets --with pydantic --with anyio
+p3-server-lite: ## the server without PyTorch (Intel Mac): needs data/models/yolo11n.onnx; RECORD=1 to save frames
+	DETECTOR=onnx LOCALIZER=$${LOCALIZER:-real} LOCALIZATION_SCOPE=$${LOCALIZATION_SCOPE:-property} \
+		uv run --no-project $(P3_SERVER_DEPS) python -m server.server
+
+p3-onnx-check: ## the ONNX detector loads and runs (IMAGE=photo.jpg to list what it sees)
+	$(P3_PY) -m server.detect_onnx $(if $(IMAGE),--image "$(IMAGE)")
 
 p3-hfov: ## estimate the phone camera's horizontal FOV from photos taken at the scan point (DIR=...)
 	$(P3_PY) tools/calibrate.py --estimate-hfov "$(DIR)"
