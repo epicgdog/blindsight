@@ -1,1 +1,16 @@
-.env.local
+# Secrets: never commit credentials (Matterport keys live in .env.local)
+.env*
+!.env.example
+
+# Local demo sessions and regenerated Part 3 artifacts
+data/sessions/
+data/synthetic/
+data/eval/cache/
+data/onsite/
+data/negatives/
+
+# Python / tooling
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
