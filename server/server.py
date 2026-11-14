@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import base64
 import importlib
+import inspect
 import io
 import json
 import logging
@@ -73,7 +74,12 @@ def decode_image(packet: FramePacket, settings: Settings) -> tuple[np.ndarray, b
 def make_localizer(settings: Settings):
     module = "server.localize_stub" if settings.localizer == "stub" else "server.localize"
     try:
-        return importlib.import_module(module).Localizer()
+        factory = importlib.import_module(module).Localizer
+        parameters = inspect.signature(factory).parameters
+        kwargs = {"data_dir": settings.data_dir} if "data_dir" in parameters else {}
+        if settings.pano_id and "pano_id" in parameters:
+            kwargs["pano_id"] = settings.pano_id
+        return factory(**kwargs)
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "Real localizer is unavailable. Use LOCALIZER=stub until Part 3 lands."
@@ -156,7 +162,9 @@ class Pipeline:
             "server_ms": {
                 "decode": (decoded - start) * 1000,
                 "yolo": (detected - decoded) * 1000,
-                "embed": (localized - detected) * 1000,
+                "embed": getattr(self.localizer, "last_debug", {}).get(
+                    "embed", (localized - detected) * 1000
+                ),
                 "total": (time.monotonic() - received_s) * 1000,
             },
             "detections": [describe(d, self.settings.hfov_deg) for d in detections],
@@ -251,6 +259,7 @@ class Runtime:
     metrics: Metrics
     localizer_factory: object
     initial_localizer: object = None
+    active_localizer: object = None
     latest: Processed | None = None
     phone_active: bool = False
     viewers: set = field(default_factory=set)
@@ -283,11 +292,17 @@ class Runtime:
 def pano_metadata(settings: Settings) -> dict:
     pano_id = settings.pano_id
     root = settings.data_dir / "pano"
+    selected = root / "pano.json"
+    chosen = {}
+    if selected.is_file():
+        with suppress(OSError, ValueError):
+            chosen = json.loads(selected.read_text())
+            pano_id = pano_id or chosen.get("pano_id")
     if pano_id is None and root.is_dir():
         candidates = sorted(p for p in root.iterdir() if p.is_dir())
         if len(candidates) == 1:
             pano_id = candidates[0].name
-    label = settings.pano_label
+    label = settings.pano_label or chosen.get("label")
     locations = settings.data_dir / "matterport" / "panoLocations.json"
     if label is None and locations.is_file():
         # Handles either saved list or nested GraphQL response without inventing API fields.
@@ -321,6 +336,18 @@ def pano_metadata(settings: Settings) -> dict:
             filename = f"face_{index}.jpg"
             if (root / pano_id / filename).is_file():
                 faces.append(f"/data/pano/{quote(pano_id, safe='')}/{filename}")
+    references = []
+    if pano_id and Path(pano_id).name == pano_id:
+        manifest = root / pano_id / "refs" / "refs.json"
+        if manifest.is_file():
+            with suppress(OSError, ValueError, KeyError):
+                references = [
+                    {
+                        **ref,
+                        "path": f"/data/pano/{quote(pano_id, safe='')}/refs/{quote(ref['file'], safe='')}",
+                    }
+                    for ref in json.loads(manifest.read_text())["refs"]
+                ]
     return {
         "pano_id": pano_id,
         "label": label,
@@ -328,6 +355,8 @@ def pano_metadata(settings: Settings) -> dict:
         "face_urls": faces,
         "thresholds": calibration,
         "localizer": settings.localizer,
+        "refs": references,
+        "model_id": chosen.get("model_id"),
     }
 
 
@@ -388,7 +417,11 @@ def create_app(
 
     @app.get("/api/pano")
     async def pano():
-        return await asyncio.to_thread(pano_metadata, settings)
+        result = await asyncio.to_thread(pano_metadata, settings)
+        localizer = app.state.runtime.active_localizer or app.state.runtime.initial_localizer
+        if localizer is not None and hasattr(localizer, "s"):
+            result["thresholds"] = localizer.s.thresholds()
+        return result
 
     @app.get("/metrics")
     async def metrics():
@@ -400,6 +433,8 @@ def create_app(
         result["p50_ms"] = result["latency_ms"]["p50"]
         result["p95_ms"] = result["latency_ms"]["p95"]
         report = settings.data_dir / "reports" / "localization.json"
+        if not report.is_file():
+            report = settings.data_dir / "eval" / "results.json"
         if report.is_file():
             with suppress(OSError, ValueError):
                 result["localization_accuracy"] = await asyncio.to_thread(
@@ -461,6 +496,9 @@ def create_app(
         if latest is None:
             raise HTTPException(409, "No frame available")
         filename = await asyncio.to_thread(save_capture, settings, kind, latest.jpeg)
+        localizer = app.state.runtime.active_localizer
+        if kind == "neg" and localizer is not None and hasattr(localizer, "add_negative"):
+            await app.state.runtime.work(localizer.add_negative, latest.rgb)
         return {"saved": filename, "seq": latest.result["seq"]}
 
     @app.websocket("/ws/phone")
@@ -525,7 +563,14 @@ def create_app(
             localizer = runtime.initial_localizer
             if localizer is None:
                 localizer = await runtime.work(runtime.localizer_factory)
-            runtime.initial_localizer = None
+            # Part 3 offers reset(): retain costly model/reference caches and verified
+            # warm-up references while resetting temporal state between phone sessions.
+            if callable(getattr(localizer, "reset", None)):
+                await runtime.work(localizer.reset)
+                runtime.initial_localizer = localizer
+            else:
+                runtime.initial_localizer = None
+            runtime.active_localizer = localizer
             pipeline = await runtime.work(Pipeline, settings, runtime.detector, localizer)
             tasks.append(asyncio.create_task(process()))
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -543,6 +588,7 @@ def create_app(
                 if runtime.warmup:
                     runtime.warmup.deadline = 0
                 runtime.phone_active = False
+                runtime.active_localizer = None
                 with suppress(RuntimeError, WebSocketDisconnect):
                     await websocket.close()
 

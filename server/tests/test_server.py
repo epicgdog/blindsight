@@ -195,3 +195,51 @@ def test_viewer_assets_and_pano_metadata(settings):
         pano = client.get("/api/pano").json()
         assert pano["pano_id"] == "test-id" and len(pano["faces"]) == 6
         assert all(client.get(url).status_code == 200 for url in pano["faces"])
+
+
+def test_part3_metadata_references_and_metrics(settings):
+    root = settings.data_dir / "pano" / "chosen"
+    (root / "refs").mkdir(parents=True)
+    (settings.data_dir / "pano/pano.json").write_text(
+        '{"pano_id":"chosen","label":"Demo lobby","model_id":"model"}'
+    )
+    # Multiple panoramas must use Part 3's chosen pano, not directory ordering.
+    (settings.data_dir / "pano/other").mkdir()
+    Image.new("RGB", (10, 10)).save(root / "face_0.jpg")
+    Image.new("RGB", (10, 10)).save(root / "refs/y000.jpg")
+    (root / "refs/refs.json").write_text(
+        '{"refs":[{"name":"y000","file":"y000.jpg","yaw":0,"pitch":0}]}'
+    )
+    (settings.data_dir / "eval").mkdir()
+    (settings.data_dir / "eval/results.json").write_text('{"simulated":true,"targets":[]}')
+    with TestClient(create_app(settings)) as client:
+        pano = client.get("/api/pano").json()
+        assert pano["pano_id"] == "chosen" and pano["label"] == "Demo lobby"
+        assert client.get(pano["refs"][0]["path"]).status_code == 200
+        assert client.get("/metrics").json()["localization_accuracy"]["simulated"] is True
+
+
+def test_resettable_localizer_is_reused_and_negatives_added(settings, packet):
+    class Resettable(VerifiedLocalizer):
+        resets = negatives = 0
+
+        def reset(self):
+            self.resets += 1
+
+        def add_negative(self, frame):
+            self.negatives += 1
+
+    instance = Resettable()
+    built = []
+
+    def factory():
+        built.append(instance)
+        return instance
+
+    with TestClient(create_app(settings, localizer_factory=factory)) as client:
+        for _ in range(2):
+            with client.websocket_connect("/ws/phone") as phone:
+                phone.send_bytes(packet())
+                assert phone.receive_json()["cue"]
+                assert client.post("/api/capture/neg").status_code == 200
+    assert len(built) == 1 and instance.resets == 2 and instance.negatives == 2

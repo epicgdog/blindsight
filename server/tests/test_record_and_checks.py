@@ -101,6 +101,32 @@ def test_image_directory_source_and_args(tmp_path):
         parse_args(["--soak"])
 
 
+def test_part3_frame_manifest_preserves_compass(tmp_path):
+    from PIL import Image
+
+    Image.new("RGB", (48, 64)).save(tmp_path / "frame.jpg")
+    (tmp_path / "frames.jsonl").write_text('{"file":"frame.jpg","heading_deg":123.5}\n')
+    frames = list(source_frames(parse_args(["--images", str(tmp_path)])))
+    assert frames[0][1].header.heading_deg == 123.5
+
+
+def test_native_part3_evaluation_adapter():
+    report, metrics, _ = full_evidence()
+    evaluation = {
+        "simulated": True,
+        "frames": {
+            "geometry": {"false_match_rate": 0, "recall": 1},
+            "yaw_err_median": 1,
+            "yaw_err_p95": 2,
+        },
+        "walkthroughs": {"neg_walkthroughs": 20, "neg_false_locked": 0, "pos_locked_within_2s": 20},
+        "targets": [{"pass": True}],
+    }
+    assert demo_failures(report, metrics, evaluation) == []
+    evaluation["targets"][0]["pass"] = False
+    assert demo_failures(report, metrics, evaluation)
+
+
 def test_oversized_images_rejected(settings, packet):
     from server.protocol import ProtocolError
     from server.server import decode_image

@@ -49,6 +49,12 @@ def source_frames(args):
                 return
             base += last + 1 / args.fps
     elif args.images:
+        headings = {}
+        manifest = args.images / "frames.jsonl"
+        if manifest.is_file():
+            for line in manifest.read_text().splitlines():
+                row = json.loads(line)
+                headings[row["file"]] = row.get("heading_deg")
         files = sorted(
             p for p in args.images.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png"}
         )
@@ -59,6 +65,10 @@ def source_frames(args):
             for path in files:
                 with Image.open(path) as image:
                     packet = image_packet(image, seq)
+                if path.name in headings:
+                    packet = FramePacket(
+                        replace(packet.header, heading_deg=headings[path.name]), packet.jpeg
+                    )
                 yield seq / args.fps, packet
                 seq += 1
             if not args.loop:
@@ -68,14 +78,24 @@ def source_frames(args):
         # (RGB, heading_deg). A finite generator is restarted only with --loop.
         module = importlib.import_module("tools.synthetic_feed")
         factory = getattr(module, "iter_frames", None)
-        if factory is None:
-            raise ValueError("Part 3 synthetic_feed must export iter_frames(fps, width, height)")
+        if factory is not None:
+
+            def frames():
+                return factory(fps=args.fps, width=480, height=640)
+        elif hasattr(module, "iter_feed"):
+
+            def frames():
+                return module.iter_feed(fps=args.fps, seconds=args.seconds or 36, size=(480, 640))
+        else:
+            raise ValueError("Part 3 synthetic_feed must export iter_feed() or iter_frames()")
         seq = 0
         while True:
             count = 0
-            for frame in factory(fps=args.fps, width=480, height=640):
+            for frame in frames():
                 heading = None
-                if isinstance(frame, tuple):
+                if hasattr(frame, "frame_rgb"):
+                    heading, frame = frame.heading_deg, frame.frame_rgb
+                elif isinstance(frame, tuple):
                     frame, heading = frame
                 packet = image_packet(Image.fromarray(np.asarray(frame, dtype=np.uint8)), seq)
                 packet = FramePacket(replace(packet.header, heading_deg=heading), packet.jpeg)
@@ -231,6 +251,26 @@ def read_metrics(url):
 def demo_failures(report, metrics, evaluation):
     """Strict full-demo gate; missing evidence is a failure, never a simulated pass."""
     failures = []
+    if "frames" in evaluation:
+        # Native Part 3 eval/results.json (held-out test split), preserving its extra gates.
+        original = evaluation
+        frame_metrics = original.get("frames", {})
+        geometry = frame_metrics.get("geometry", {})
+        walks = original.get("walkthroughs", {})
+        evaluation = {
+            "split": "held-out",
+            "simulated": original.get("simulated"),
+            "false_locked_rate": geometry.get("false_match_rate"),
+            "recall": geometry.get("recall"),
+            "negative_walkthroughs": walks.get("neg_walkthroughs"),
+            "false_locked_walkthroughs": walks.get("neg_false_locked"),
+            "locked_within_2s_trials": walks.get("pos_locked_within_2s"),
+            "yaw_median_deg": frame_metrics.get("yaw_err_median"),
+            "yaw_p95_deg": frame_metrics.get("yaw_err_p95"),
+        }
+        targets = original.get("targets", [])
+        if not targets or not all(t.get("pass") is True for t in targets):
+            failures.append("Part 3 evaluation targets did not all pass")
     if report["mode"] != {"detector": "yolo", "localizer": "real"}:
         failures.append("requires YOLO and the real localizer")
     checks = [
@@ -320,9 +360,10 @@ async def main(argv=None):
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(reports, indent=2) + "\n")
         if args.demo_check:
-            evaluation = (
-                json.loads(args.eval_report.read_text()) if args.eval_report.is_file() else {}
-            )
+            eval_path = args.eval_report
+            if not eval_path.is_file() and eval_path == Path("data/reports/localization.json"):
+                eval_path = Path("data/eval/results.json")
+            evaluation = json.loads(eval_path.read_text()) if eval_path.is_file() else {}
             failures = demo_failures(report, after, evaluation)
             if failures:
                 for failure in failures:

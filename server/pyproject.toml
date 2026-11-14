@@ -7,6 +7,7 @@ dependencies = [
   "ultralytics>=8.3,<9", "pillow>=11,<13", "numpy>=2,<3",
   "torch>=2.5,<3", "transformers>=4.46,<6",
   "websockets>=14,<17", "opencv-python>=4.10,<5",
+  "lightglue @ git+https://github.com/cvg/LightGlue.git@5a650c444718caffc2669dc0094cde908f42dd73",
 ]
 
 [build-system]
