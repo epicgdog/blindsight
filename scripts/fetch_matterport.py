@@ -38,12 +38,14 @@ import json
 import os
 import re
 import shutil
+import ssl
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 import cv2
+import certifi
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -130,13 +132,20 @@ class ApiError(RuntimeError):
     pass
 
 
+def tls_context():
+    """Verified TLS on python.org macOS installs, honoring explicit CA configuration."""
+    if os.environ.get("SSL_CERT_FILE") or os.environ.get("SSL_CERT_DIR"):
+        return ssl.create_default_context()
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 def graphql(cfg: dict, headers: dict, query: str, variables: dict) -> dict:
     body = json.dumps({"query": query, "variables": variables}).encode()
     req = urllib.request.Request(cfg["endpoint"], data=body, method="POST",
                                  headers={"Content-Type": "application/json", "Accept": "application/json",
                                           "User-Agent": USER_AGENT, **headers})
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=60, context=tls_context()) as r:
             data = json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
         detail = e.read()[:400].decode("utf-8", "replace").strip()
@@ -201,7 +210,7 @@ def face_urls(cfg: dict, headers: dict, pano: dict, pano_id: str) -> list[str]:
 
 def download(url: str, dest: Path, headers: dict | None = None) -> None:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
-    with urllib.request.urlopen(req, timeout=120) as r:
+    with urllib.request.urlopen(req, timeout=120, context=tls_context()) as r:
         data = r.read()
     img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
     if img is None:

@@ -53,6 +53,7 @@ version = "0.1.0"
 source = { editable = "server" }
 dependencies = [
     { name = "anyio" },
+    { name = "certifi" },
     { name = "fastapi" },
     { name = "lightglue" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -69,6 +70,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "anyio", specifier = ">=4,<5" },
+    { name = "certifi", specifier = ">=2024.8" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "lightglue", git = "https://github.com/cvg/LightGlue.git?rev=5a650c444718caffc2669dc0094cde908f42dd73" },
     { name = "numpy", specifier = ">=2,<3" },

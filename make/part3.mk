@@ -7,7 +7,7 @@
 # Without PyTorch the localizer uses SIFT and the weight-free retriever (it falls back
 # automatically); recent PyTorch has no Intel-Mac builds, so that is the Intel-Mac setup.
 # Only p3-weights installs PyTorch/transformers/LightGlue.
-P3_DEPS    := --with numpy --with opencv-python-headless --with pillow --with pytest
+P3_DEPS    := --with numpy --with opencv-python-headless --with pillow --with pytest --with certifi
 P3_ML_DEPS := --with torch --with transformers --with "lightglue @ git+https://github.com/cvg/LightGlue.git"
 P3_PY      ?= $(if $(wildcard server/pyproject.toml),uv run --project server python,uv run --no-project $(P3_DEPS) python)
 P3_PY_ML   ?= $(if $(wildcard server/pyproject.toml),uv run --project server python,uv run --no-project $(P3_DEPS) $(P3_ML_DEPS) python)

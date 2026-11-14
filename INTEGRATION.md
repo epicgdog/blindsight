@@ -12,7 +12,14 @@ accessible. Never silently replace the selected property.
 Run `uv run python scripts/fetch_matterport.py --check` before downloading. API access
 requires MATTERPORT_API_KEY and MATTERPORT_API_TOKEN in git-ignored .env.local.
 Public browser access is insufficient for API downloads. Credentials are absent in
-this integration checkout. Real-property accuracy has therefore not been measured.
+this integration checkout at initial verification. Real-property accuracy has therefore not been measured.
+
+Subsequent authenticated check: the supplied key authenticates successfully to
+HackPrinceton 2026, but model 6sd6A5r5EVp returns GraphQL not.found. Organizers must
+grant this key access to the exact selected space or identify its authorized API ID.
+The public viewer alone does not resolve this. Credentials are stored locally only.
+The fetcher now uses a verified certifi CA bundle on macOS Python installs and
+honors explicit SSL_CERT_FILE / SSL_CERT_DIR overrides; TLS verification stays enabled.
 
 After access is granted: make p3-fetch, visually verify face orientation and text,
 then make p3-refs, p3-synth, p3-calibrate and p3-eval. Property-specific data and
