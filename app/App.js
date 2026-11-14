@@ -12,6 +12,7 @@ import { runCaptureLoop } from "./src/loop";
 import { encodeFrame } from "./src/protocol";
 import { normalizeServerUrl } from "./src/address";
 import { base64ToBytes } from "./src/base64";
+import { PICTURE_OPTIONS, PICTURE_SIZE } from "./src/camera";
 
 const KEY = "blindsight.server";
 const DEFAULT = process.env.EXPO_PUBLIC_SERVER_URL ?? "";
@@ -67,7 +68,7 @@ export default function App() {
     runCaptureLoop({
       isRunning: () => runningRef.current,
       capture: async () => {
-        const p = await camera.current.takePictureAsync({ quality: 0.3, exif: false, skipProcessing: false, base64: true });
+        const p = await camera.current.takePictureAsync(PICTURE_OPTIONS);
         return { bytes: base64ToBytes(p.base64), w: p.width, h: p.height };
       },
       send: async (bytes, header) => {
@@ -96,7 +97,7 @@ export default function App() {
       <Text style={s.status}>
         {status.connected ? "connected" : "disconnected"} · {status.state ?? "–"} · {fps.toFixed(1)} fps
       </Text>
-      <CameraView ref={camera} style={s.preview} facing="back" />
+      <CameraView ref={camera} style={s.preview} facing="back" pictureSize={PICTURE_SIZE} />
     </View>
   );
 }
