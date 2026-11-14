@@ -262,7 +262,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--from-json", type=Path, default=None, help="use a saved panoLocations response")
     ap.add_argument("--pano-id", default=None, help="force this pano instead of the ranked pick")
-    ap.add_argument("--neighbors", type=int, default=10, help="nearest scan points to download as negatives")
+    ap.add_argument("--neighbors", type=int, default=20,
+                    help="nearest scan points to download (hard negatives and competing places)")
     ap.add_argument("--candidates", type=int, default=5, help="top candidates whose faces are scored by keypoints")
     ap.add_argument("--import-faces", type=Path, default=None, help="manual fallback: directory of face_*.jpg")
     a = ap.parse_args(argv)
