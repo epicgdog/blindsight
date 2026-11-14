@@ -1,1 +1,9 @@
 .env.local
+.venv/
+__pycache__/
+node_modules/
+data/
+*.pyc
+.expo/
+dist/
+
