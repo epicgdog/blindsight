@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Button, StyleSheet, Text, TextInput, View } from "react-native";
+import { Button, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Speech from "expo-speech";
-import { setAudioModeAsync } from "expo-audio";
+import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from "expo-audio";
 import * as Location from "expo-location";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
@@ -19,6 +19,7 @@ import { AUDIO_MODE, speechOptions } from "./src/audio";
 import { attitudeFromGravity, createMotionDetector, smoothGravity } from "./src/attitude";
 import { ackBody, createAckTracker, sendAck, speechAckUrl } from "./src/ack";
 import { PICTURE_OPTIONS, PICTURE_SIZE, SAVE_OPTIONS, resizePlan } from "./src/camera";
+import { MIN_CLIP_MS, RECORD_MODE, agentTalkUrl, postClip } from "./src/talk";
 
 const KEY = "blindsight.server";
 const DEFAULT = process.env.EXPO_PUBLIC_SERVER_URL ?? "";
@@ -34,6 +35,10 @@ export default function App() {
   const runningRef = useRef(false);
   const client = useRef(null);
   const speaking = useRef(false);
+  const talking = useRef(false); // hold-to-talk: cues stay quiet while the user speaks
+  const talkStart = useRef(0);
+  const [talkState, setTalkState] = useState("idle"); // idle | listening | thinking
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const frames = useRef([]);
   const sizeLogged = useRef(false);
   const ackUrl = useRef(null);
@@ -92,7 +97,7 @@ export default function App() {
           speaking.current = true;
         },
         stop: () => { Speech.stop(); speaking.current = false; },
-        isSpeaking: () => speaking.current,
+        isSpeaking: () => speaking.current || talking.current,
       },
       { log: (m) => console.log(m) },
     ),
@@ -141,6 +146,39 @@ export default function App() {
     });
   }, [address, perm, askPerm, speaker]);
 
+  const talkIn = useCallback(async () => {
+    if (talking.current) return;
+    talking.current = true; talkStart.current = Date.now(); setTalkState("listening");
+    Speech.stop(); speaking.current = false;
+    try {
+      const p = await requestRecordingPermissionsAsync();
+      if (!p.granted) throw new Error("microphone permission denied");
+      await setAudioModeAsync(RECORD_MODE);
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+    } catch (e) {
+      console.log("record", e?.message);
+      talking.current = false; setTalkState("idle");
+      Speech.speak("Microphone not available.", speechOptions());
+    }
+  }, [recorder, speaker]);
+
+  const talkOut = useCallback(async () => {
+    if (!talking.current) return;
+    const held = Date.now() - talkStart.current;
+    let uri = null;
+    try { await recorder.stop(); uri = recorder.uri; } catch (e) { console.log("record stop", e?.message); }
+    await setAudioModeAsync(AUDIO_MODE).catch(() => {});
+    talking.current = false;
+    const url = agentTalkUrl(normalizeServerUrl(address));
+    if (!uri || !url || held < MIN_CLIP_MS) { setTalkState("idle"); return; }
+    setTalkState("thinking");
+    const out = await postClip(fetch, url, uri);
+    if (out.heard) console.log(`heard: ${out.heard}`);
+    setTalkState("idle");
+    speaker.announce(out.reply);
+  }, [recorder, address, speaker]);
+
   const stop = useCallback(() => {
     runningRef.current = false; setRunning(false);
     client.current?.stop();
@@ -157,6 +195,12 @@ export default function App() {
         {status.connected ? "connected" : "disconnected"} · {status.state ?? "–"} · {fps.toFixed(1)} fps · pitch {pitch == null ? "–" : `${Math.round(pitch)}°`} · {moving == null ? "–" : moving ? "walking" : "still"}
       </Text>
       <CameraView ref={camera} style={s.preview} facing="back" pictureSize={PICTURE_SIZE} />
+      <Pressable style={[s.talk, talkState === "listening" && s.talkOn]} onPressIn={talkIn} onPressOut={talkOut}
+        accessibilityRole="button" accessibilityLabel="Hold to talk">
+        <Text style={s.talkText}>
+          {talkState === "listening" ? "Listening…" : talkState === "thinking" ? "Thinking…" : "Hold to talk"}
+        </Text>
+      </Pressable>
     </View>
   );
 }
@@ -167,4 +211,7 @@ const s = StyleSheet.create({
   input: { backgroundColor: "#222", color: "#fff", padding: 12, borderRadius: 8, fontSize: 16 },
   status: { color: "#fff", fontSize: 20 },
   preview: { width: 120, height: 160, borderRadius: 8, overflow: "hidden" },
+  talk: { flex: 1, minHeight: 160, backgroundColor: "#1d4ed8", borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  talkOn: { backgroundColor: "#dc2626" },
+  talkText: { color: "#fff", fontSize: 34, fontWeight: "800" },
 });

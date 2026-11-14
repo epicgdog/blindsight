@@ -9,7 +9,8 @@
       "supportsTablet": false,
       "infoPlist": {
         "NSCameraUsageDescription": "Blindsight streams the camera to your laptop to detect objects and locate you.",
-        "NSLocationWhenInUseUsageDescription": "Blindsight reads the compass heading."
+        "NSLocationWhenInUseUsageDescription": "Blindsight reads the compass heading.",
+        "NSMicrophoneUsageDescription": "Hold to talk: Blindsight sends your voice question to the guide."
       }
     },
     "plugins": [

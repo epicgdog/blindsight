@@ -35,7 +35,8 @@ from pydantic import BaseModel, Field
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from server.config import Settings
+from server.agent import AgentState, GeminiAgent, agent_router
+from server.config import Settings, env_bool
 from server.cues import CueEngine, describe
 from server.detect import Detector, StubDetector
 from server.minimap import scan_points
@@ -44,6 +45,7 @@ from server.protocol import FramePacket, ProtocolError, decode_frame
 from server.record import SessionRecorder
 
 log = logging.getLogger("blindsight")
+AGENT_ON = env_bool("AGENT", True)  # voice agent + entrance guidance (demo)
 
 
 def decode_image(packet: FramePacket, settings: Settings) -> tuple[np.ndarray, bytes]:
@@ -176,8 +178,9 @@ class Processed:
 class Pipeline:
     """All mutable ML state stays on one dedicated worker, never the event loop."""
 
-    def __init__(self, settings: Settings, detector, localizer):
+    def __init__(self, settings: Settings, detector, localizer, agent_state: AgentState | None = None):
         self.settings = settings
+        self.agent_state = agent_state
         self.detector = detector
         self.localizer = localizer
         try:
@@ -214,7 +217,15 @@ class Pipeline:
         else:
             self.location = self.localizer.update(rgb, detections, hdr.heading_deg)
         localized = time.monotonic()
-        cue = self.cues.update(detections, self.location, localized)
+        described = [describe(d, self.settings.hfov_deg) for d in detections]
+        match = getattr(self.localizer, "last_debug", {}).get("match")
+        nav_text = None
+        if self.agent_state is not None:
+            try:
+                nav_text = self.agent_state.on_frame(localized, match, described, self.location.to_dict(), jpeg)
+            except Exception:  # guidance must never break the frame pipeline
+                log.exception("Agent state update failed")
+        cue = self.cues.update(detections, self.location, localized, nav_text=nav_text)
         if warmup and localized < warmup.deadline:
             warmup.attempted += 1
             try:
@@ -237,13 +248,15 @@ class Pipeline:
                 ),
                 "total": (time.monotonic() - received_s) * 1000,
             },
-            "detections": [describe(d, self.settings.hfov_deg) for d in detections],
+            "detections": described,
             "location": self.location.to_dict(),
             "localization_debug": getattr(self.localizer, "last_debug", {}),
             "cue": asdict(cue) if cue else None,
             "mode": {"detector": self.settings.detector, "localizer": self.settings.localizer},
-            "match": getattr(self.localizer, "last_debug", {}).get("match"),
+            "match": match,
         }
+        if self.agent_state is not None:
+            result["agent"] = self.agent_state.snapshot()
         # Fail closed on a broken plugin result (e.g. NaN), before sending JSON or recording.
         json.dumps(result, allow_nan=False)
         if self.recorder:
@@ -337,6 +350,7 @@ class Runtime:
     viewers: set = field(default_factory=set)
     warmup: Warmup | None = None
     cue_ids: dict = field(default_factory=dict)
+    agent: object = None
 
     async def work(self, function, *args):
         future = asyncio.get_running_loop().run_in_executor(self.executor, function, *args)
@@ -473,6 +487,12 @@ def create_app(
                 settings, actual_detector, executor, Metrics(settings.metrics_window_s), factory
             )
             runtime.initial_localizer = initial_localizer
+            if AGENT_ON:
+                try:
+                    state = AgentState(settings.data_dir, log_dir=settings.data_dir / "agent_log")
+                    runtime.agent = GeminiAgent(state)
+                except Exception:  # the demo agent is optional; never block the server
+                    log.exception("Voice agent unavailable")
             app.state.runtime = runtime
             log.info(
                 "Server ready: detector=%s, localizer=%s", settings.detector, settings.localizer
@@ -483,6 +503,7 @@ def create_app(
 
     app = FastAPI(title="Blindsight", lifespan=lifespan)
     app.include_router(navigation_router(settings.data_dir))
+    app.include_router(agent_router(lambda: getattr(getattr(app.state, "runtime", None), "agent", None)))
 
     @app.get("/")
     async def index():
@@ -682,7 +703,13 @@ def create_app(
             else:
                 runtime.initial_localizer = None
             runtime.active_localizer = localizer
-            pipeline = await runtime.work(Pipeline, settings, runtime.detector, localizer)
+            if runtime.agent is not None:
+                runtime.agent.state.reset()
+                runtime.agent.reset()
+            pipeline = await runtime.work(
+                Pipeline, settings, runtime.detector, localizer,
+                runtime.agent.state if runtime.agent is not None else None,
+            )
             tasks.append(asyncio.create_task(process()))
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
