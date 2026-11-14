@@ -27,3 +27,4 @@ data/eval/cache/
 
 # Python / tooling
 *.pyc
+data/pano/*/cache/
