@@ -1,0 +1,45 @@
+{
+ "_source": "HackPrinceton 2026 CoStar track quickstart ('One house, inside and out'), sections 1, 3, 4 and 5, pasted 2026-11-14. Only the panoLocations query gained the model-level 'name' field, which the quickstart's Basics query uses.",
+ "endpoint": "https://api.matterport.com/api/models/graph",
+ "auth": "basic",
+ "env_vars": [
+  "MATTERPORT_API_KEY",
+  "MATTERPORT_API_TOKEN"
+ ],
+ "query_variable": "id",
+ "key_check_query": "{ rootFolder { name modelCountSummary(includeModelsInSubfolders: true) } }",
+ "model_check_query": "query Basics($id: ID!) { model(id: $id) { id name visibility panoLocations { id } } }",
+ "pano_query": "query Panos($id: ID!) { model(id: $id) { name panoLocations { id label position { x y z } skybox(resolution: \"2k\") { status children } } } }",
+ "pano_list_path": [
+  "data",
+  "model",
+  "panoLocations"
+ ],
+ "model_name_path": [
+  "data",
+  "model",
+  "name"
+ ],
+ "fields": {
+  "id": [
+   "id"
+  ],
+  "label": [
+   "label"
+  ],
+  "position": [
+   "position"
+  ]
+ },
+ "skybox_query": null,
+ "skybox_status_path": [
+  "skybox",
+  "status"
+ ],
+ "face_urls_path": [
+  "skybox",
+  "children"
+ ],
+ "faces_need_auth": false,
+ "rooms_query": "query Rooms($id: ID!) { model(id: $id) { floors { id label vertices { id position { x y } } edges { id vertices { id } } } rooms { id floor { id } classifications { label confidence } boundary { edges { id } } } } }"
+}
