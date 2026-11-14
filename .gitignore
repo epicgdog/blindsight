@@ -14,3 +14,7 @@ data/reports/
 runs/
 data/pano/*/face_*.jpg
 data/matterport/
+node_modules/
+.expo/
+dist/
+slides/backup.mp4

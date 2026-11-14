@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blindsight viewer</title>
+  <link rel="stylesheet" href="/viewer/style.css">
+</head>
+<body>
+  <header>
+    <h1>Blindsight</h1>
+    <div id="conn" class="pill">connecting…</div>
+    <div id="latency" class="pill">p50 – ms</div>
+    <div id="fps" class="pill">– fps</div>
+  </header>
+  <main>
+    <section class="panel" id="frame-panel">
+      <div id="live-frame-wrap">
+        <img id="live-frame" alt="live camera frame">
+        <div id="boxes"></div>
+      </div>
+    </section>
+    <section class="panel" id="status-panel">
+      <div id="state-badge" class="state-lost">LOST</div>
+      <div class="readouts">
+        <div>Score <b id="score">–</b></div>
+        <div>Inliers <b id="inliers">–</b></div>
+        <div>Yaw <b id="yaw">–</b></div>
+      </div>
+      <svg id="sparkline" viewBox="0 0 200 40" preserveAspectRatio="none" aria-label="score history">
+        <polyline id="spark-line" fill="none" points=""></polyline>
+      </svg>
+      <div id="ref-strip" aria-label="closest reference views"></div>
+    </section>
+    <section class="panel" id="cue-panel">
+      <h2>Cues</h2>
+      <ol id="cue-log"></ol>
+    </section>
+    <section class="panel" id="capture-panel">
+      <button id="btn-pos">Save as positive</button>
+      <button id="btn-neg">Save as negative</button>
+      <button id="btn-warmup">Start 20 s warm-up</button>
+      <progress id="warmup-progress" max="20" value="0"></progress>
+      <div id="warmup-text">Warm-up idle</div>
+    </section>
+  </main>
+  <script type="module" src="/viewer/app.js"></script>
+</body>
+</html>
