@@ -76,3 +76,49 @@ def test_corrupt_image(settings):
 def test_invalid_detection(bbox):
     with pytest.raises(ValueError):
         Detection("chair", 0.9, bbox)
+
+
+# ---- optional camera attitude from the phone's accelerometer ------------------------------
+
+
+def test_header_accepts_optional_pitch_and_roll():
+    from server.protocol import FrameHeader, decode_frame, encode_frame
+
+    jpeg = b"\xff\xd8" + b"0" * 10
+    h = FrameHeader(1, 5.0, 90.0, 10, 20, pitch_deg=-12.5, roll_deg=3.0)
+    out = decode_frame(encode_frame(h, jpeg)).header
+    assert (out.pitch_deg, out.roll_deg) == (-12.5, 3.0)
+
+
+def test_old_headers_without_attitude_still_decode():
+    import json
+    import struct
+
+    from server.protocol import decode_frame
+
+    raw = json.dumps({"seq": 1, "ts_ms": 1, "heading_deg": None, "w": 4, "h": 4}).encode()
+    pkt = decode_frame(struct.pack(">I", len(raw)) + raw + b"\xff\xd8xx")
+    assert pkt.header.pitch_deg is None and pkt.header.roll_deg is None
+
+
+@pytest.mark.parametrize("pitch,roll", [(91, 0), (-91, 0), (0, 181), (float("nan"), 0), ("10", 0)])
+def test_attitude_out_of_range_is_rejected(pitch, roll):
+    from server.protocol import FrameHeader, ProtocolError
+
+    with pytest.raises(ProtocolError):
+        FrameHeader(1, 5.0, None, 10, 20, pitch_deg=pitch, roll_deg=roll)
+
+
+def test_header_moving_flag_round_trips_and_defaults_to_none():
+    jpeg = b"\xff\xd8" + b"0" * 10
+    for moving in (True, False, None):
+        out = decode_frame(encode_frame(FrameHeader(1, 5.0, None, 10, 20, moving=moving), jpeg)).header
+        assert out.moving is moving
+    raw = json.dumps({"seq": 1, "ts_ms": 1, "heading_deg": None, "w": 4, "h": 4}).encode()
+    assert decode_frame(struct.pack(">I", len(raw)) + raw + b"\xff\xd8xx").header.moving is None
+
+
+@pytest.mark.parametrize("moving", [1, 0, "false", 0.0])
+def test_moving_must_be_boolean(moving):
+    with pytest.raises(ProtocolError):
+        FrameHeader(1, 5.0, None, 10, 20, moving=moving)

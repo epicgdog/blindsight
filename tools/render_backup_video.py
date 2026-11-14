@@ -94,6 +94,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seconds", type=int, default=60)
     ap.add_argument("--fps", type=int, default=5)
+    ap.add_argument("--height", type=int, default=1000, help="browser viewport height in pixels")
     ap.add_argument("--out", default="slides/backup.mp4")
     ap.add_argument("--server", default=None, help="ws/http base of a running server (default: start echo server)")
     a = ap.parse_args()
@@ -136,7 +137,7 @@ def main():
         with connect(target["webSocketDebuggerUrl"], max_size=None) as cws, connect(ws_base + "/ws/phone") as phone:
             cdp = Cdp(cws)
             cdp.call("Page.enable")
-            cdp.call("Emulation.setDeviceMetricsOverride", width=1280, height=720, deviceScaleFactor=1, mobile=False)
+            cdp.call("Emulation.setDeviceMetricsOverride", width=1280, height=a.height, deviceScaleFactor=1, mobile=False)
             cdp.call("Page.navigate", url=http_base + "/")
             time.sleep(1.5)
             cdp.call("Runtime.evaluate", expression=(

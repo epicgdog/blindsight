@@ -52,3 +52,44 @@ test("a capture or send error does not kill the loop", async () => {
   });
   assert.equal(sent, 2);
 });
+
+test("onFrame reports when each frame's capture started", async () => {
+  const frames = []; let running = true; let t = 100;
+  await runCaptureLoop({
+    isRunning: () => running, now: () => (t += 10),
+    capture: async () => ({ bytes: new Uint8Array([1]), w: 1, h: 1 }),
+    send: async () => { if (frames.length === 3) running = false; },
+    getHeading: () => 0,
+    onFrame: (f) => frames.push(f),
+  });
+  assert.deepEqual(frames.map((f) => f.seq), [1, 2, 3]);
+  assert.ok(frames.every((f) => Number.isFinite(f.captureStartMs)));
+});
+
+test("headers carry pitch and roll when an attitude is available", async () => {
+  const headers = []; let running = true;
+  await runCaptureLoop({
+    isRunning: () => running,
+    capture: async () => ({ bytes: new Uint8Array([1]), w: 1, h: 1 }),
+    send: async (_b, h) => { headers.push(h); if (headers.length === 2) running = false; },
+    getHeading: () => 10,
+    getAttitude: () => (headers.length === 0 ? { pitch_deg: -5, roll_deg: 1.5 } : null),
+  });
+  assert.equal(headers[0].pitch_deg, -5);
+  assert.equal(headers[0].roll_deg, 1.5);
+  assert.ok(!("pitch_deg" in headers[1]), "no attitude, no keys");
+});
+
+test("headers carry moving only when the detector has an answer", async () => {
+  const headers = []; let running = true;
+  const atts = [{ pitch_deg: 0, roll_deg: 0, moving: false }, { pitch_deg: 0, roll_deg: 0 }];
+  await runCaptureLoop({
+    isRunning: () => running,
+    capture: async () => ({ bytes: new Uint8Array([1]), w: 1, h: 1 }),
+    send: async (_b, h) => { headers.push(h); if (headers.length === 2) running = false; },
+    getHeading: () => 0,
+    getAttitude: () => atts[headers.length],
+  });
+  assert.equal(headers[0].moving, false);
+  assert.ok(!("moving" in headers[1]));
+});

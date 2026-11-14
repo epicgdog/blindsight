@@ -243,3 +243,55 @@ def test_resettable_localizer_is_reused_and_negatives_added(settings, packet):
                 assert phone.receive_json()["cue"]
                 assert client.post("/api/capture/neg").status_code == 200
     assert len(built) == 1 and instance.resets == 2 and instance.negatives == 2
+
+
+def test_oversized_frame_is_logged_with_its_dimensions(settings, caplog):
+    """A phone sending full-resolution photos must be diagnosable from the server log."""
+    import logging
+
+    from server.config import Settings
+    from server.protocol import FrameHeader, ProtocolError, decode_frame, encode_frame
+    from server.server import decode_image
+
+    small = Settings(
+        data_dir=settings.data_dir,
+        detector="stub",
+        localizer="stub",
+        viewer_dir=settings.viewer_dir,
+        max_image_pixels=1000,
+    )
+    buffer = io.BytesIO()
+    Image.new("RGB", (60, 80), (1, 2, 3)).save(buffer, format="JPEG")
+    packet = decode_frame(encode_frame(FrameHeader(1, 1.0, None, 60, 80), buffer.getvalue()))
+    with caplog.at_level(logging.WARNING, logger="blindsight"):
+        with pytest.raises(ProtocolError):
+            decode_image(packet, small)
+    assert any("60x80" in r.getMessage() and "1000" in r.getMessage() for r in caplog.records)
+
+
+def test_full_resolution_phone_photo_is_downscaled_not_rejected(settings):
+    """An iPhone 12 MP photo (4032x3024) must flow through at working resolution."""
+    from server.protocol import FrameHeader, decode_frame, encode_frame
+    from server.server import decode_image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (4032, 3024), (40, 90, 160)).save(buffer, format="JPEG", quality=30)
+    packet = decode_frame(encode_frame(FrameHeader(1, 1.0, None, 4032, 3024), buffer.getvalue()))
+    rgb, jpeg = decode_image(packet, settings)
+    assert max(rgb.shape[:2]) <= settings.max_frame_side
+    assert rgb.shape[1] / rgb.shape[0] == pytest.approx(4032 / 3024, abs=0.01)  # aspect kept
+    with Image.open(io.BytesIO(jpeg)) as out:
+        assert out.size == (rgb.shape[1], rgb.shape[0])
+
+
+def test_absurdly_large_frames_are_still_rejected(settings):
+    from dataclasses import replace
+
+    from server.protocol import FrameHeader, ProtocolError, decode_frame, encode_frame
+    from server.server import decode_image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (2000, 2000), (1, 1, 1)).save(buffer, format="JPEG")
+    packet = decode_frame(encode_frame(FrameHeader(1, 1.0, None, 2000, 2000), buffer.getvalue()))
+    with pytest.raises(ProtocolError):
+        decode_image(packet, replace(settings, max_image_pixels=1_000_000))
