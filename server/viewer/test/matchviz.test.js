@@ -34,6 +34,8 @@ test("rankRows keeps server order and marks the locked pano", () => {
   assert.equal(rows[0].name, "Other / Hallway");
   assert.equal(rows[0].percent, 80);
   assert.equal(rows[0].rank, 1);
+  assert.equal(rows[0].scan, "34");
+  assert.equal(rows[1].scan, "0");
 });
 
 test("rankRows tolerates a missing match", () => {
