@@ -61,3 +61,34 @@ model selection and actual phone-to-audio latency must be measured on the demo l
 Current tests prove multi-place selection, transitions and rejection on a procedural
 room, not all-66-scan accuracy in Rabinowitz Hall. Real-property held-out phone frames
 and walkthroughs remain required before claiming reliable building-wide localization.
+
+## Teach it places with phone photos
+
+Real iPhone photos close the gap between Matterport renders and the phone camera, and
+give each place a spoken name (Matterport labels nearly every scan "Hallway").
+
+1. `open data/matterport/topdown.png` and note the scan number of each place you want.
+2. Stand on that scan's dot. Phone in portrait, 1x, chest height. Take about 12 photos
+   turning a full circle. Convert HEIC to JPEG (`sips -s format jpeg *.HEIC --out jpg/`).
+3. Put them in `data/onsite/places/<scan number>_<name>/`, for example
+   `data/onsite/places/34_front_door/`. The words after the number are spoken
+   ("front door"). The folder may also start with the full pano id.
+4. Restart the server. Startup prints, per folder, how many photos were added and which
+   were skipped. `GET /api/pano` lists the same under `photo_places`.
+
+Each photo is verified against its scan's panorama views (same inlier and grid tests as
+a lock) and stored with the pano-frame yaw the verification recovers. A photo that does
+not line up with its scan, or that another scan or an unknown-place photo explains
+better, is skipped: a mislabelled folder cannot teach a wrong place. Photos therefore
+only help where they at least weakly match the scan; they then make later phone frames
+match much more strongly. At most 40 photos per folder are used.
+
+Test with a different set of photos than the teaching ones:
+
+```
+make -f make/part3.mk p3-places-test DIR=$HOME/Desktop/place_tests
+```
+
+`place_tests/34_front_door/*.jpg` are expected to be recognised as scan 34;
+`place_tests/elsewhere/*.jpg` (any folder that is not a scan number) must not match.
+Each photo is judged on its own (no temporal fusion), with the result and the reason.

@@ -14,7 +14,7 @@ P3_PY      ?= uv run --no-project $(P3_DEPS) python
 P3_PY_ML   ?= uv run --no-project $(P3_DEPS) $(P3_ML_DEPS) python
 
 .PHONY: p3-help p3-access p3-list p3-fetch p3-try p3-hfov p3-refs p3-synth p3-calibrate p3-eval p3-feed p3-video \
-        p3-weights p3-test p3-selfcheck p3-all p3-check
+        p3-weights p3-test p3-selfcheck p3-all p3-check p3-places-test
 
 p3-help: ## list the Part 3 targets
 	@grep -E '^p3-[a-z-]+:.*## ' $(lastword $(MAKEFILE_LIST)) | sed 's/:.*## /\t/'
@@ -52,6 +52,9 @@ p3-weights: ## download DINOv2 + SuperPoint/LightGlue weights and prove they loa
 p3-try: ## run the localizer on real photos: DIR=~/Desktop/at_spot (JPEG/PNG; iPhone at 1x, portrait)
 	$(P3_PY) server/localize.py --try "$(DIR)"
 
+p3-places-test: ## which scan each phone photo is recognised as: DIR=... (subfolders like 34_front_door; elsewhere/)
+	$(P3_PY) -m server.property_localize --try "$(DIR)"
+
 p3-hfov: ## estimate the phone camera's horizontal FOV from photos taken at the scan point (DIR=...)
 	$(P3_PY) tools/calibrate.py --estimate-hfov "$(DIR)"
 
@@ -61,7 +64,8 @@ p3-selfcheck: ## PASS/FAIL: localizer loads (pano, refs, models) and calibration
 p3-test: ## Part 3 unit + pipeline tests (procedural room, no Matterport data needed)
 	$(P3_PY) -m pytest -q server/tests/test_p3_state_machine.py server/tests/test_p3_geometry.py \
 		server/tests/test_p3_refs.py server/tests/test_p3_localizer.py server/tests/test_p3_eval.py \
-		server/tests/test_p3_fetch.py server/tests/test_p3_feed.py
+		server/tests/test_p3_fetch.py server/tests/test_p3_feed.py \
+		server/tests/test_p3_photo_places.py
 
 p3-all: p3-refs p3-synth p3-calibrate p3-eval ## everything after p3-fetch
 
