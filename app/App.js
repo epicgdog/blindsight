@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Button, StyleSheet, Text, TextInput, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Speech from "expo-speech";
+import { setAudioModeAsync } from "expo-audio";
 import * as Location from "expo-location";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
@@ -14,6 +15,7 @@ import { encodeFrame } from "./src/protocol";
 import { normalizeServerUrl } from "./src/address";
 import { base64ToBytes } from "./src/base64";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
+import { AUDIO_MODE, speechOptions } from "./src/audio";
 import { isUprightPortrait, smoothGravity } from "./src/orientation";
 import { PICTURE_OPTIONS, PICTURE_SIZE, SAVE_OPTIONS, resizePlan } from "./src/camera";
 
@@ -43,6 +45,7 @@ export default function App() {
     (async () => {
       const saved = await AsyncStorage.getItem(KEY);
       if (saved && !DEFAULT) setAddress(saved);
+      await setAudioModeAsync(AUDIO_MODE).catch((e) => console.log("audio mode", e?.message));
       await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
       const loc = await Location.requestForegroundPermissionsAsync();
       if (loc.granted) {
@@ -76,7 +79,7 @@ export default function App() {
   const speaker = useRef(
     createCueSpeaker(
       {
-        speak: (t) => { Speech.speak(t, { onStart: () => (speaking.current = true), onDone: () => (speaking.current = false), onStopped: () => (speaking.current = false), onError: () => (speaking.current = false) }); speaking.current = true; },
+        speak: (t) => { Speech.speak(t, speechOptions({ onStart: () => (speaking.current = true), onSettled: () => (speaking.current = false) })); speaking.current = true; },
         stop: () => { Speech.stop(); speaking.current = false; },
         isSpeaking: () => speaking.current,
       },
@@ -90,6 +93,7 @@ export default function App() {
     await AsyncStorage.setItem(KEY, address);
     if (!perm?.granted) await askPerm();
     await activateKeepAwakeAsync();
+    await setAudioModeAsync(AUDIO_MODE).catch((e) => console.log("audio mode", e?.message));
     await speaker.startupCheck();
     client.current = createClient({ url, speaker, onStatus: setStatus });
     client.current.start();
