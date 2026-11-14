@@ -105,6 +105,7 @@ const scanName = (p) => (p?.room ? p.room : p?.label != null ? `Scan ${p.label}`
 // Markers for the active floor: the active place, ranked candidates, recent trail, other points.
 export function mapMarkers(map, activeId, ranking, trail, w, h) {
   if (!map?.points?.length) return { floor: null, name: "", markers: [] };
+  if (map.plan) return planMarkers(map, activeId, ranking, trail);
   const ranked = (ranking ?? []).map((r) => r.place);
   const focus = activeId ?? ranked[0] ?? null;
   const floor = floorOfPlace(map.points, focus) ?? 0;
@@ -128,4 +129,44 @@ export function errorText(status, body) {
   if (status >= 200 && status < 300) return "";
   if (typeof body?.detail === "string") return body.detail;
   return status >= 500 ? `Server error (${status})` : `Request refused (${status})`;
+}
+
+// ---- minimap with a floor-plan image (floor 1 only) ----
+// Matterport plans: pixel x = (world x - origin.x) * resolution, pixel y = height - (world y - origin.y) * resolution.
+export const planPoint = (p, plan) => ({
+  x: +((p.x - plan.origin.x) * plan.resolution).toFixed(2),
+  y: +(plan.height - (p.y - plan.origin.y) * plan.resolution).toFixed(2),
+});
+
+export function planViewBox(points, plan, pad = 150) {
+  const px = points.map((p) => planPoint(p, plan));
+  const x1 = Math.max(0, Math.min(...px.map((p) => p.x)) - pad);
+  const y1 = Math.max(0, Math.min(...px.map((p) => p.y)) - pad);
+  const x2 = Math.min(plan.width, Math.max(...px.map((p) => p.x)) + pad);
+  const y2 = Math.min(plan.height, Math.max(...px.map((p) => p.y)) + pad);
+  return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+}
+
+function planMarkers(map, activeId, ranking, trail) {
+  const plan = map.plan;
+  const ranked = (ranking ?? []).map((r) => r.place);
+  const here = map.points.filter((p) => p.floor === plan.floor);
+  const activePoint = map.points.find((p) => p.id === activeId);
+  const otherFloor = !!activePoint && activePoint.floor !== plan.floor;
+  const markers = here.map((p) => {
+    let kind = "point";
+    if (p.id === activeId) kind = "active";
+    else if (ranked.slice(0, 3).includes(p.id)) kind = "candidate";
+    else if ((trail ?? []).includes(p.id)) kind = "trail";
+    const px = planPoint(p, plan);
+    return { id: p.id, kind, x: px.x, y: px.y, rank: ranked.indexOf(p.id) + 1 };
+  });
+  return {
+    floor: plan.floor,
+    name: activePoint ? scanName(activePoint) : "",
+    markers,
+    viewBox: planViewBox(here, plan),
+    plan,
+    otherFloor,
+  };
 }
