@@ -1,0 +1,24 @@
+{
+  "_readme": [
+    "Copy to data/matterport/api.json and fill every null from the hackathon quickstart:",
+    "https://betaapp.matterport.com/2026-princeton-hackathon/quickstart",
+    "Do not guess values. endpoint: GraphQL URL. auth: 'basic' (two env vars: id, secret),",
+    "'bearer' (one env var) or 'header:<Name>' (one env var). env_vars: credential variable",
+    "names exactly as the quickstart writes them; their values go in .env.local (git-ignored).",
+    "pano_query: query text taking $modelId and returning panoLocations. pano_list_path: keys",
+    "from the response root to that list. fields: keys inside one pano entry (id, label,",
+    "position per PLAN.md). face_urls_path: keys from a pano entry (or from the skybox_query",
+    "response, which takes $modelId and $panoId) to the six 2k face URLs, or to a URL",
+    "template containing {face}."
+  ],
+  "endpoint": null,
+  "auth": null,
+  "env_vars": null,
+  "pano_query": null,
+  "pano_list_path": null,
+  "fields": {"id": ["id"], "label": ["label"], "position": ["position"]},
+  "skybox_query": null,
+  "face_urls_path": null,
+  "face_url_key": ["url"],
+  "faces_need_auth": false
+}
