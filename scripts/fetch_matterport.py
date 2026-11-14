@@ -38,6 +38,7 @@ import os
 import re
 import shutil
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -119,12 +120,26 @@ def auth_headers(cfg: dict, creds: list[str] | None) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------- API
+USER_AGENT = "blindsight-part3/1.0"  # Python's default "Python-urllib" agent is often refused by API firewalls
+
+
+class ApiError(RuntimeError):
+    pass
+
+
 def graphql(cfg: dict, headers: dict, query: str, variables: dict) -> dict:
     body = json.dumps({"query": query, "variables": variables}).encode()
     req = urllib.request.Request(cfg["endpoint"], data=body, method="POST",
-                                 headers={"Content-Type": "application/json", **headers})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        data = json.loads(r.read().decode())
+                                 headers={"Content-Type": "application/json", "Accept": "application/json",
+                                          "User-Agent": USER_AGENT, **headers})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            data = json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        detail = e.read()[:400].decode("utf-8", "replace").strip()
+        hint = {401: "the key or token is wrong", 403: "refused: wrong key/token, or the request was blocked"}
+        raise ApiError(f"HTTP {e.code} from {cfg['endpoint']} ({hint.get(e.code, 'see the response')}). "
+                       f"Response: {detail or '(empty)'}") from None
     if data.get("errors"):
         raise RuntimeError(f"API errors: {json.dumps(data['errors'])[:500]}")
     return data
@@ -182,7 +197,7 @@ def face_urls(cfg: dict, headers: dict, pano: dict, pano_id: str) -> list[str]:
 
 
 def download(url: str, dest: Path, headers: dict | None = None) -> None:
-    req = urllib.request.Request(url, headers=headers or {})
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
     with urllib.request.urlopen(req, timeout=120) as r:
         data = r.read()
     img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
@@ -351,7 +366,13 @@ def main(argv=None) -> int:
     cfg = load_api_config(API_CFG)
     headers: dict = {}
     if a.check:
-        return check_access(cfg, auth_headers(cfg, credentials(cfg)))
+        try:
+            return check_access(cfg, auth_headers(cfg, credentials(cfg)))
+        except ApiError as ex:
+            print(f"Key check FAILED: {ex}", file=sys.stderr)
+            print("Check .env.local: two lines, MATTERPORT_API_KEY=<API key> and MATTERPORT_API_TOKEN=<API token>, "
+                  "values from /costar-keys with no quotes or spaces.", file=sys.stderr)
+            return 5
     if a.from_json:
         raw = json.loads(a.from_json.read_text())
     else:
