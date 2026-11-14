@@ -52,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from localization_debug import localization_reason  # noqa: E402
 from matchviz import footprint_polygon, rank_places  # noqa: E402
 from position import PositionSolver  # noqa: E402
+from tracker import SCAN_POINT_SIGMA_M, Measurement, PositionTracker, fix_sigma  # noqa: E402
 from refmask import compute_masks, mask_key, region_polygons  # noqa: E402
 from geometry import (  # noqa: E402
     Features,
@@ -127,9 +128,8 @@ PITCH_GATE_DEG = float(os.environ.get("P3_PITCH_GATE_DEG", "15"))
 # data/matterport/pano_frame.json (tools/calibrate_pano_frame.py). P3_POSITION=0 turns it off.
 POSITION_ON = os.environ.get("P3_POSITION", "1") != "0"
 # Phone reports it is not walking (accelerometer): the user is on the same spot, so the
-# place may not switch and position fixes are averaged into one held point. A fix farther
-# than this from the held point is treated as an outlier while still.
-STILL_REJECT_M = float(os.environ.get("P3_STILL_REJECT_M", "0.5"))
+# place may not switch. Position is tracked by a Kalman filter (tracker.py) whose motion
+# noise follows the walking flag; it also rejects matches implausibly far from the track.
 MAX_ONSITE_NEG = 200  # frames from Part 1's POST /api/capture/neg used as competing views
 ONSITE_NEG = "onsite_negatives"  # place name for those frames
 COMP_YAWS = tuple(range(0, 360, 15))  # competitor views: every 15 degrees at pitch 0
@@ -656,7 +656,9 @@ class Localizer:
         self.n_onsite = 0
         self.last_debug: dict = {}
         self.position: PositionSolver | None = None
-        self._anchor: dict | None = None  # held position while the phone is still
+        self.tracker = PositionTracker()
+        self.clock = time.monotonic  # tracker time source (tests replace it)
+        self._scan_xyz = {k: np.asarray(v, float) for k, v in self._place_positions(meta).items()}
         if POSITION_ON:
             try:
                 self.position = PositionSolver.load(self.data_dir)
@@ -1016,7 +1018,16 @@ class Localizer:
                 if abs(float(best.pitch) - float(pitch_deg)) > PITCH_GATE_DEG:
                     matched, imu_rejected = False, True
             still = moving is False
-            if self.multi:
+            fix = (self._position_fix(fe, best, frame_rgb.shape)
+                   if matched and best is not None and self.mode != "retrieval" else None)
+            track = self.tracker.step(self.clock(), moving, self._measurement(best, fix) if matched else None)
+            jump_rejected = False
+            if matched and best is not None and track.rejected and best.place != self.tracker.place:
+                matched, jump_rejected = False, True  # implausibly far from the tracked position
+            if self.multi and track.reinit and best is not None and best.place != self._place:
+                self._place, self._votes = best.place, {}  # tracker restarted there: switch now
+                self._sm.reset()
+            elif self.multi:
                 matched, best = self._hold_place(matched, best, hold=still)
             yaw = None
             conf = 0.0
@@ -1028,8 +1039,7 @@ class Localizer:
                     yaw = best.yaw
                     conf = min(1.0, best.inliers / (2.0 * max(1, self.s.N_MIN)))
             st = self._sm.step(matched, yaw, heading, conf)
-            fix = self._position_fix(fe, best, frame_rgb.shape) if matched and self.mode != "retrieval" else None
-            position = self._held_position(fix, best if matched else None, still)
+            position = self._track_view(track, fix, still)
             ref = best or fe.top_demo
             pano_id, label = self.pano_id, self.label
             if self.multi:
@@ -1050,7 +1060,9 @@ class Localizer:
             self.last_debug = {
                 "match": self._match_view(fe, best, ref, st.yaw, frame_rgb.shape, position),
                 "position": fix.to_dict() if fix is not None else None,
-                "moving": moving,
+                "moving": moving, "jump_rejected": jump_rejected,
+                "track": {"accepted": track.accepted, "rejected": track.rejected, "reinit": track.reinit,
+                          "d2": None if track.d2 is None else round(track.d2, 2)},
                 "imu_rejected": imu_rejected,
                 "imu_pitch": pitch_deg, "imu_roll": roll_deg,
                 "matched": matched, "embed": round(fe.embed_ms, 1), "extract": round(fe.extract_ms, 1),
@@ -1090,32 +1102,28 @@ class Localizer:
             return True, best
         return False, best  # hold the current place until the new one is confirmed
 
-    def _held_position(self, fix, best, still: bool) -> dict | None:
-        """Position for the viewer. Walking (or unknown): this frame's fix. Still: the running
-        mean of the fixes since the phone stopped, outliers dropped, kept between fixes."""
-        a = self._anchor
-        if not still or (a is not None and best is not None and best.place != a["place"]):
-            self._anchor = a = None
-        new = None
-        if fix is not None and fix.world is not None and best is not None:
-            new = np.asarray(fix.world, float)
-            if still:
-                if a is None:
-                    self._anchor = a = {"place": best.place, "sum": new.copy(), "n": 1}
-                elif float(np.linalg.norm(new - a["sum"] / a["n"])) <= STILL_REJECT_M:
-                    a["sum"] += new
-                    a["n"] += 1
-        if a is not None:
-            m = a["sum"] / a["n"]
-            return {"place": a["place"], "x": round(float(m[0]), 3), "y": round(float(m[1]), 3),
-                    "z": round(float(m[2]), 3), "held": True, "n": a["n"],
-                    "offset_m": round(float(fix.offset_m), 3) if fix is not None else None,
-                    "inliers": int(fix.inliers) if fix is not None else 0}
-        if new is None:
+    def _measurement(self, best, fix) -> Measurement | None:
+        """Tracker input for a verified match: the PnP fix, else the matched scan point."""
+        if best is None:
             return None
-        return {"place": best.place, "x": round(float(new[0]), 3), "y": round(float(new[1]), 3),
-                "z": round(float(new[2]), 3), "held": False, "n": 1,
-                "offset_m": round(fix.offset_m, 3), "inliers": fix.inliers}
+        if fix is not None and fix.world is not None:
+            return Measurement(np.asarray(fix.world, float), fix_sigma(fix.inliers, fix.offset_m), best.place)
+        xyz = self._scan_xyz.get(best.place)
+        return None if xyz is None else Measurement(xyz, SCAN_POINT_SIGMA_M, best.place)
+
+    def _track_view(self, track, fix, still: bool) -> dict | None:
+        """Tracked position for the viewer (None until the tracker has a measurement)."""
+        xyz = self.tracker.xyz
+        if xyz is None:
+            return None
+        return {"place": self.tracker.place, "x": round(float(xyz[0]), 3), "y": round(float(xyz[1]), 3),
+                "z": round(float(xyz[2]), 3), "sigma_m": round(float(self.tracker.sigma_m), 3),
+                "still": still, "n": self.tracker.n_accepted,
+                "source": "pnp" if fix is not None and track.accepted else ("scan_point" if track.accepted else "track"),
+                "rejected": track.rejected, "reinit": track.reinit,
+                "raw": None if fix is None or fix.world is None else [round(float(v), 3) for v in fix.world],
+                "offset_m": round(float(fix.offset_m), 3) if fix is not None else None,
+                "inliers": int(fix.inliers) if fix is not None else 0}
 
     def _position_fix(self, fe, best, shape):
         """Metric camera position for the verified best match, or None."""
@@ -1233,7 +1241,7 @@ class Localizer:
             self._n = 0
             self._sims = None
             self._place, self._votes = None, {}
-            self._anchor = None
+            self.tracker.reset()
 
     def info(self) -> dict:
         return {
