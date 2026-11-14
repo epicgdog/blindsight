@@ -1,1 +1,14 @@
-.env.local
+.env*
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+data/sessions/
+data/onsite/
+data/negatives/
+data/models/
+data/reports/
+runs/
