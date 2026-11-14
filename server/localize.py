@@ -1140,15 +1140,24 @@ class Localizer:
             for c in fe.cands:
                 inl[c.place] = max(inl.get(c.place, 0), int(c.inliers))
             ranking = rank_places(np.asarray(sims)[: len(places)], places, top=8, inliers=inl)
+            # "Where on the pano" shows the highest-confidence view of this frame: the verified
+            # candidate (scan point pano) with the most inliers, which may differ from the place
+            # currently reported while hysteresis holds it.
+            top = max((c for c in fe.cands if c.demo and c.yaw is not None and c.inliers > 0),
+                      key=lambda c: (c.inliers, c.grid), default=None)
+            if top is None and best is not None and best.yaw is not None:
+                top = best
             footprint = None
-            if best is not None and best.yaw is not None:
+            if top is not None:
                 h, w = shape[:2]
-                pitch = best.pitch if best.pitch is not None else 0.0
-                roll = best.roll if best.roll is not None else 0.0
+                use_track = best is not None and top.place == best.place and yaw is not None
                 footprint = footprint_polygon(
-                    yaw if yaw is not None else best.yaw, pitch, roll, self.s.HFOV_DEG, h / max(1, w)
+                    yaw if use_track else top.yaw, top.pitch or 0.0, top.roll or 0.0,
+                    self.s.HFOV_DEG, h / max(1, w)
                 )
-            out = {"ranking": ranking, "footprint": footprint}
+            out = {"ranking": ranking, "footprint": footprint,
+                   "pano": top.place if top is not None else None,
+                   "pano_inliers": int(top.inliers) if top is not None else 0}
             if position is not None:
                 out["position"] = position
             return out
