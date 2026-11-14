@@ -32,6 +32,12 @@ export function fpsFromTimes(times) {
   return dt > 0 ? ((times.length - 1) * 1000) / dt : 0;
 }
 
-export const refStrip = (urls, best) => urls.map((url, i) => ({ url, index: i, highlight: best != null && (url === best || i === best) }));
+// best_ref may be an index, a face URL, or a face name such as "face_2" (Part 1 types it as str | None).
+const stem = (u) => String(u).split("/").pop().replace(/\.[a-z]+$/i, "");
+export const refStrip = (urls, best) =>
+  urls.map((url, i) => ({
+    url, index: i,
+    highlight: best != null && (url === best || i === best || stem(url) === stem(best)),
+  }));
 
 export const clock = (ms) => new Date(ms).toTimeString().slice(0, 8);

@@ -303,6 +303,7 @@ def pano_metadata(settings: Settings) -> dict:
         candidates = sorted(p for p in root.iterdir() if p.is_dir())
         if len(candidates) == 1:
             pano_id = candidates[0].name
+    pano_id = pano_id or settings.default_pano_id
     label = settings.pano_label or chosen.get("label")
     locations = settings.data_dir / "matterport" / "panoLocations.json"
     if label is None and locations.is_file():
@@ -326,6 +327,9 @@ def pano_metadata(settings: Settings) -> dict:
             label = find_label(json.loads(locations.read_text()))
         except (OSError, ValueError):
             log.warning("Unable to read pano labels")
+        if label is not None and str(label).isdigit():
+            label = None  # Matterport sweep numbers are not speakable place names
+    label = label or settings.default_pano_label
     calibration_file = settings.data_dir / "calibration.json"
     calibration = None
     if calibration_file.is_file():
@@ -357,7 +361,7 @@ def pano_metadata(settings: Settings) -> dict:
         "thresholds": calibration,
         "localizer": settings.localizer,
         "refs": references,
-        "model_id": chosen.get("model_id"),
+        "model_id": chosen.get("model_id") or settings.matterport_model_id,
     }
 
 
