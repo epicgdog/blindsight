@@ -79,7 +79,7 @@ def test_viewer_renders_live_pano_ranking_and_footprint(server):
     assert len(rows) >= 3, dom[:3000]
     assert 'rank-row here' in dom  # the locked pano is marked
     names = re.findall(r'class="rank-name"[^>]*>([^<]+)<', dom)
-    assert names[0] == "Hallway" and "Other / Hallway" in names
+    assert names[0] == "Hallway · scan 0" and "Other / Hallway · scan 34" in names
     assert re.search(r'id="footprint".*<polygon', dom, re.S)
     assert re.search(r'id="cmp-live"[^>]*src="data:image/jpeg', dom)
     assert "mask-layer" not in dom and "ignored" not in dom  # no masking overlay

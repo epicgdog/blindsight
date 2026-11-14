@@ -60,6 +60,7 @@ export const rankRows = (match, activePano, info = {}) =>
     rank: i + 1,
     place: r.place,
     name: placeName(r.place, info),
+    scan: info[r.place]?.label ?? null,
     percent: simPercent(r.sim),
     inliers: r.inliers ?? 0,
     here: r.place === activePano,

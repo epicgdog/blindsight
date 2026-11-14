@@ -58,7 +58,7 @@ function renderMatch(r) {
     li.className = "rank-row" + (row.here ? " here" : "");
     li.style.order = row.rank;
     li.querySelector(".rank-n").textContent = row.rank;
-    li.querySelector(".rank-name").textContent = row.name;
+    li.querySelector(".rank-name").textContent = row.scan != null ? `${row.name} · scan ${row.scan}` : row.name;
     li.querySelector(".bar i").style.width = row.percent + "%";
     li.querySelector(".rank-pct").textContent = row.percent + "%";
     li.querySelector(".rank-in").textContent = row.inliers ? row.inliers + " in" : "";
