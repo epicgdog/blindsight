@@ -4,9 +4,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export async function runCaptureLoop({
   isRunning, capture, send, getHeading, now = Date.now, onTiming = () => {}, retryDelayMs = 200,
+  canCapture = () => true, onBlocked = () => {}, blockedPollMs = 100,
 }) {
   let seq = 0;
   while (isRunning()) {
+    if (!canCapture()) {
+      onBlocked();
+      await sleep(blockedPollMs);
+      continue;
+    }
     try {
       const t0 = now();
       const shot = await capture();

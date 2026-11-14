@@ -52,3 +52,31 @@ test("a capture or send error does not kill the loop", async () => {
   });
   assert.equal(sent, 2);
 });
+
+test("capture is skipped while canCapture is false, and resumes without losing the sequence", async () => {
+  let running = true, allowed = false, captures = 0, blocked = 0;
+  const sent = [];
+  setTimeout(() => { allowed = true; }, 40);
+  await runCaptureLoop({
+    isRunning: () => running,
+    canCapture: () => allowed,
+    onBlocked: () => { blocked += 1; },
+    blockedPollMs: 5,
+    capture: async () => { captures += 1; return { bytes: new Uint8Array([1]), w: 10, h: 20 }; },
+    send: async (_b, header) => { sent.push(header.seq); if (sent.length === 3) running = false; },
+    getHeading: () => 0,
+  });
+  assert.ok(blocked >= 3, `blocked ${blocked} times while tilted`);
+  assert.equal(captures, 3, "no capture happened while blocked");
+  assert.deepEqual(sent, [1, 2, 3]);
+});
+
+test("stopping while blocked ends the loop", async () => {
+  let running = true;
+  setTimeout(() => { running = false; }, 30);
+  await runCaptureLoop({
+    isRunning: () => running, canCapture: () => false, blockedPollMs: 5,
+    capture: async () => { throw new Error("must not capture"); },
+    send: async () => {}, getHeading: () => 0,
+  });
+});
