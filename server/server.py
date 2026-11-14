@@ -499,6 +499,15 @@ def create_app(
         result["map"] = await asyncio.to_thread(scan_points, settings.data_dir)
         return result
 
+    @app.get("/api/floorplan/{floor}")
+    async def floorplan(floor: str):
+        if not floor.isdigit():
+            raise HTTPException(404, "Unknown floor")
+        path = settings.data_dir / "matterport" / f"floor{int(floor) + 1}.png"
+        if not path.is_file():
+            raise HTTPException(404, "No floor plan for that floor")
+        return FileResponse(path, media_type="image/png")
+
     @app.get("/metrics")
     async def metrics():
         runtime = app.state.runtime

@@ -74,3 +74,21 @@ def test_missing_or_broken_file_gives_no_points(tmp_path):
     (tmp_path / "matterport").mkdir()
     (tmp_path / "matterport" / "panoLocations.json").write_text("not json")
     assert scan_points(tmp_path)["points"] == []
+
+
+def test_plan_info_is_included_when_a_floor_plan_was_downloaded(tmp_path):
+    write(tmp_path, [pano("a", "0", 0.0, 0.0, 1.3)])
+    meta = {"width": 2500, "height": 2000, "resolution": 80.0, "origin": {"x": -10.0, "y": -12.0}, "floor": 0,
+            "label": "Floor 1", "file": "floor1.png"}
+    (tmp_path / "matterport" / "floorplan_floor1.json").write_text(json.dumps(meta))
+    (tmp_path / "matterport" / "floor1.png").write_bytes(b"png")
+    plan = scan_points(tmp_path)["plan"]
+    assert plan == {"url": "/api/floorplan/0", "width": 2500, "height": 2000, "resolution": 80.0,
+                    "origin": {"x": -10.0, "y": -12.0}, "floor": 0, "label": "Floor 1"}
+
+
+def test_no_plan_without_the_image_file(tmp_path):
+    write(tmp_path, [pano("a", "0", 0.0, 0.0, 1.3)])
+    (tmp_path / "matterport" / "floorplan_floor1.json").write_text(json.dumps({"width": 1, "height": 1,
+        "resolution": 1.0, "origin": {"x": 0, "y": 0}, "floor": 0, "file": "floor1.png"}))
+    assert scan_points(tmp_path)["plan"] is None

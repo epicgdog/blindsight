@@ -92,17 +92,31 @@ function renderMinimap(r) {
   if (!mapData) return;
   const active = r.location?.state === "LOCKED" ? r.location?.pano_id : null;
   if (active) trail = pushTrail(trail, active, 8);
-  const { floor, name, markers } = mapMarkers(mapData, active, r.match?.ranking, trail, 400, 400);
+  const { floor, name, markers, viewBox, plan, otherFloor } = mapMarkers(mapData, active, r.match?.ranking, trail, 400, 400);
   const svg = $("minimap");
-  svg.replaceChildren(...markers.map((m) => {
-    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  const NS = "http://www.w3.org/2000/svg";
+  const scale = viewBox ? viewBox.w / 400 : 1; // dot sizes are in plan pixels when a plan is shown
+  const nodes = [];
+  if (plan && viewBox) {
+    svg.setAttribute("viewBox", `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
+    const img = document.createElementNS(NS, "image");
+    img.setAttribute("href", plan.url);
+    img.setAttribute("x", 0); img.setAttribute("y", 0);
+    img.setAttribute("width", plan.width); img.setAttribute("height", plan.height);
+    nodes.push(img);
+  } else {
+    svg.setAttribute("viewBox", "0 0 400 400");
+  }
+  for (const m of markers) {
+    const c = document.createElementNS(NS, "circle");
     c.setAttribute("class", `mm-dot mm-${m.kind}`);
     c.setAttribute("cx", m.x); c.setAttribute("cy", m.y);
-    c.setAttribute("r", m.kind === "active" ? 12 : m.kind === "point" ? 5 : 8);
-    return c;
-  }));
+    c.setAttribute("r", (m.kind === "active" ? 12 : m.kind === "point" ? 5 : 8) * scale);
+    nodes.push(c);
+  }
+  svg.replaceChildren(...nodes);
   $("mm-floor").textContent = floor == null ? "" : `Floor ${floor + 1}`;
-  $("mm-place").textContent = name;
+  $("mm-place").textContent = otherFloor ? `${name} (another floor)` : name;
 }
 
 function renderRefs(best) {

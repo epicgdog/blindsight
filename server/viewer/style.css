@@ -52,9 +52,9 @@ h2 { margin:0 0 6px; font-size:22px; }
 #footprint polygon { fill:#17c96455; stroke:var(--ok); stroke-width:6; vector-effect:non-scaling-stroke; }
 
 #mm-floor { color:var(--dim); font-size:20px; font-weight:400; margin-left:8px; }
-#minimap { width:100%; max-height:380px; background:#0006; border-radius:8px; }
-.mm-dot { fill:#fff3; stroke:none; }
-.mm-dot.mm-trail { fill:#3b82f688; }
+#minimap { width:100%; max-height:420px; background:#222633; border-radius:8px; }
+.mm-dot { fill:#0009; stroke:#fff8; stroke-width:2; vector-effect:non-scaling-stroke; }
+.mm-dot.mm-trail { fill:#3b82f6cc; }
 .mm-dot.mm-candidate { fill:var(--warn); }
 .mm-dot.mm-active { fill:var(--ok); stroke:#fff; stroke-width:3; }
 #mm-place { font-size:26px; font-weight:700; margin-top:6px; min-height:34px; }
