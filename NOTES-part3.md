@@ -131,3 +131,28 @@ Other measurements on the room:
 - One pano gives the scan point and the heading, not a metric position. Nothing finer is claimed.
 - Simulated positives are rendered from the pano itself: no parallax from standing off the scan point, no lens distortion, no real lighting or people. Real-phone accuracy is unverified until A3; the warm-up (`add_reference`) reduces that risk and its accept count should be logged here.
 - The procedural room has planar walls and synthetic textures; the lobby has depth (which helps the rotation check) but also glass, reflections and repeated patterns (which hurt).
+
+## Phase 4 results (tools/eval_localization.py)
+
+<!-- p3-eval:begin -->
+Run 2026-11-14T14:02:16+00:00, model `zvKHR9DHNjJ`, pano `5ef86yc9eazqtcm82ar3irfqa` (the practice house). **SIMULATED data, held-out test split.**
+Config: matcher `sift`, retriever `classic-hog`, N_MIN 30, PLACE_RATIO 1.0, T_LO 0.7763, T_HI 0.9286, LOCK_NEED 2, HFOV 55.0, competing places 20.
+
+| Metric | Target | Measured (test split) | Pass |
+|---|---|---|---|
+| LOCKED precision on held-out negatives: per-frame false-match rate | < 1% | 0.00% | PASS |
+| Recall: held-out positives matched | >= 90% | 100.00% | PASS |
+| Yaw error median | < 8 deg | 0.05 deg | PASS |
+| Yaw error p95 | < 20 deg | 0.14 deg | PASS |
+| Latency per candidate (verify + share of extraction, p95) | < 150 ms | 38 ms | PASS |
+| False LOCKED in negative walkthroughs | 0 of 20 | 0 of 20 | PASS |
+| LOCKED within 2 s | 20 of 20 | 20 of 20 | PASS |
+| Overall localization rate (update(), this machine) | >= 2 Hz | 6.5 Hz | PASS |
+
+Per frame: 100/100 positives matched, 0/100 negatives falsely matched (precision 100.00%).
+Ablation, per frame false-match rate: retrieval alone 0.00% (0/100) vs with geometry 0.00% (0/100).
+Ablation, negative walkthroughs with a false LOCKED: retrieval alone 0 of 20 vs with geometry 0 of 20.
+Negatives by distance from the locked scan point: 0-2 m: 0/11 false, 2-4 m: 0/42 false, 4-8 m: 0/47 false.
+Stress (held-out scan points 35bu9kag74cwsq1s3f47fwqrc, 9zsku0i2t4kbd5nmbizt6yh0d, b470c6ztd8733p8xgzs1d64gb, f04my6h0adad7916q2yunyx2a, f3pzmzhdp2ctz08q984xymata, fy8ec4dfkm7mt9tdgkue04ktd, xkr2bmc0g8ed9p49mdyz24rsc removed from competing places): 0/32 frames falsely matched (0.00%), 0 of 7 walkthroughs falsely LOCKED.
+Latency p50: extract 54 ms, embed 3 ms, verify 18 ms per candidate, 7.3 candidates per frame in raw evaluation (runtime verifies competitors only when needed).
+<!-- p3-eval:end -->
