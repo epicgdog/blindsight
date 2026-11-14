@@ -21,7 +21,7 @@ function render(r) {
     const diagnostic = r.localization_debug;
     let reason = $("localization-reason");
     if (!reason) { reason = document.createElement("p"); reason.id = "localization-reason"; $("state-badge").parentElement.append(reason); }
-    reason.textContent = diagnostic?.reason ? `Matching: ${diagnostic.reason.replaceAll("_", " ")} · inliers ${diagnostic.best_inliers ?? 0} · competing scan ${diagnostic.competitor_inliers ?? 0}` : "";
+    reason.textContent = diagnostic?.reason ? `Matching: ${diagnostic.reason.replaceAll("_", " ")} · inliers ${diagnostic.best_inliers ?? 0} · competing scan ${diagnostic.competitor_inliers ?? 0}${diagnostic.distinctive_evidence?.required ? ` · distinctive ${diagnostic.distinctive_evidence.count} across ${diagnostic.distinctive_evidence.grid} cells` : ""}` : "";
     history = pushHistory(history, loc.score);
     $("spark-line").setAttribute("points", sparklinePoints(history, 200, 40));
     renderRefs(loc.best_ref);

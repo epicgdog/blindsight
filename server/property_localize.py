@@ -18,6 +18,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from server.disambiguation import distinctive_support
 from server.geometry import (
     blank_boxes,
     extract_features,
@@ -171,7 +172,7 @@ class Localizer(SingleLocalizer):
                     entry["skipped"].append(f.name)
                 else:
                     entry["added"] += 1
-            if name:
+            if name and entry["added"]:
                 self.labels[pano_id] = {"label": name}
         return report
 
@@ -199,7 +200,9 @@ class Localizer(SingleLocalizer):
         )
         sim_of = dict(zip(pano_views, sims.tolist(), strict=True))
         K = intrinsics(w, h, self.s.HFOV_DEG)
+        self._verified_live_points = {}
         cands = [self._verify(i, float(sim_of[i]), feats, K) for i in order]
+        teaching_points = dict(self._verified_live_points)
         best = max(cands, key=lambda c: (c.inliers, c.grid), default=None)
         if (
             best is None
@@ -212,7 +215,13 @@ class Localizer(SingleLocalizer):
         # unknown-place photo) that lines up better: that photo was taken somewhere else.
         _, _, _, others, _ = self.recognize(rgb)
         rival = max((c.inliers for c in others if c.place != pano_id), default=0)
-        if best.inliers < rival:
+        accepted, _, _ = choose_place([best] + [c for c in others if c.place != pano_id], self.s)
+        if best.inliers < rival or accepted is None or accepted.place != pano_id:
+            return None
+        support = distinctive_support(
+            best, others, self._verified_live_points | teaching_points, (w, h), self.s.N_MIN
+        )
+        if not support["passed"]:
             return None
         tag = place_name(path.parent.name) or "photo"
         view = RefView(
@@ -284,6 +293,7 @@ class Localizer(SingleLocalizer):
 
     def recognize(self, frame_rgb, detections=(), tracking=None):
         """One frame on its own: shortlist places, verify geometrically, pick a winner."""
+        self._verified_live_points = {}
         image = normalize_contrast(self._prep(frame_rgb))
         h, w = image.shape[:2]
         boxes = movable_boxes_px(detections, w, h)
@@ -314,6 +324,13 @@ class Localizer(SingleLocalizer):
         K = intrinsics(w, h, self.s.HFOV_DEG)
         candidates = [self._verify(i, similarities[i], features, K) for i in indices]
         winner, reason, competitor = choose_place(candidates, self.s)
+        self._distinctive = {"required": False, "passed": False, "count": 0, "grid": 0}
+        if winner is not None:
+            self._distinctive = distinctive_support(
+                winner, candidates, self._verified_live_points, (w, h), self.s.N_MIN
+            )
+            if not self._distinctive["passed"]:
+                winner, reason = None, "insufficient_distinguishing_features"
         return winner, reason, competitor, candidates, embed_ms
 
     def update(self, frame_rgb, detections, heading_deg):
@@ -347,6 +364,7 @@ class Localizer(SingleLocalizer):
                 reason=reason,
                 best_inliers=winner.inliers if winner else 0,
                 competitor_inliers=competitor,
+                distinctive_evidence=self._distinctive,
                 embed=round(embed_ms, 1),
                 total=round((time.perf_counter() - start) * 1000, 1),
                 candidates=[

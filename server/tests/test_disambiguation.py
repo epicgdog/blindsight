@@ -40,3 +40,19 @@ def test_same_place_views_are_not_rivals():
     a = SimpleNamespace(idx=0, place="a", inliers=100)
     b = SimpleNamespace(idx=1, place="a", inliers=100)
     assert distinctive_support(a, [a, b], {}, (640, 480), 30)["passed"]
+
+
+def test_rejected_teaching_photos_do_not_rename_a_scan(tmp_path):
+    from server.property_localize import Localizer
+
+    folder = tmp_path / "1_wrong_name"
+    folder.mkdir()
+    (folder / "photo.jpg").touch()
+    loc = Localizer.__new__(Localizer)
+    loc.labels = {"p": {"label": "verified name"}}
+    loc.resolve_folder = lambda _: ("p", "wrong name")
+    loc.scan_name = lambda _: "1"
+    loc._add_place_photo = lambda *_: None
+    report = loc._load_photo_places(tmp_path)
+    assert report[0]["added"] == 0
+    assert loc.labels["p"]["label"] == "verified name"

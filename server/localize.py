@@ -722,6 +722,8 @@ class Localizer:
     def _verify(self, i: int, sim: float, feats: Features, K_live: np.ndarray) -> Cand:
         r = self._refs[i]
         v = verify(self.matcher, feats, r.feats, K_live, r.K)
+        if hasattr(self, "_verified_live_points"):
+            self._verified_live_points[i] = v.live_pts
         c = Cand(i, r.view.name, r.place, r.demo, float(sim), v.inliers, v.grid_cells, v.h_inliers,
                  v.n_matches, ms=v.ms)
         pose = live_pose(v, r.view.yaw, r.view.pitch, r.view.roll)
