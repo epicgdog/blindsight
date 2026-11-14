@@ -18,10 +18,15 @@ What the script does:
  4. verify face layout (server/refs.py) and write the top-down plot, horizon image
     and contact sheets for the human to recognise the spot (A3)
 
-  python scripts/fetch_matterport.py
-  python scripts/fetch_matterport.py --from-json data/matterport/panoLocations.json
-  python scripts/fetch_matterport.py --pano-id <ID>              # override the pick
+  python scripts/fetch_matterport.py --check          # key works? can it see the model?
+  python scripts/fetch_matterport.py --label "the main lobby"
+  python scripts/fetch_matterport.py --pano-id <ID>   # override the pick
+  python scripts/fetch_matterport.py --model zvKHR9DHNjJ   # another model (e.g. the quickstart's house)
   python scripts/fetch_matterport.py --import-faces DIR --pano-id <ID>   # manual fallback
+
+Pano labels in the API are scan numbers ("22"), so the spoken name comes from --label.
+Face links are signed and expire: they are used within one run, and the copy saved to
+data/matterport/panoLocations.json has the signatures stripped.
 """
 
 from __future__ import annotations
@@ -43,7 +48,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
 from refs import check_pano  # noqa: E402
 
-MODEL_ID = "6sd6A5r5EVp"
+MODEL_ID = "6sd6A5r5EVp"  # the doc's demo model; --model overrides
 DATA = ROOT / "data"
 MP_DIR = DATA / "matterport"
 PANO_DIR = DATA / "pano"
@@ -85,7 +90,11 @@ def load_api_config(path: Path = API_CFG) -> dict:
     return cfg
 
 
-def credentials(cfg: dict) -> list[str]:
+def credentials(cfg: dict) -> list[str] | None:
+    """Credential values, or None when a network proxy injects the auth header for the
+    API host (P3_AUTH_VIA_PROXY=1, e.g. a cloud session with a saved network secret)."""
+    if os.environ.get("P3_AUTH_VIA_PROXY") == "1":
+        return None
     env = {**load_env_file(), **{k: v for k, v in os.environ.items() if k in cfg["env_vars"]}}
     missing = [k for k in cfg["env_vars"] if not env.get(k)]
     if missing:
@@ -95,7 +104,9 @@ def credentials(cfg: dict) -> list[str]:
     return [env[k] for k in cfg["env_vars"]]
 
 
-def auth_headers(cfg: dict, creds: list[str]) -> dict[str, str]:
+def auth_headers(cfg: dict, creds: list[str] | None) -> dict[str, str]:
+    if creds is None:
+        return {}
     scheme = cfg["auth"]
     if scheme == "basic":
         tok = base64.b64encode(f"{creds[0]}:{creds[1]}".encode()).decode()
@@ -119,6 +130,22 @@ def graphql(cfg: dict, headers: dict, query: str, variables: dict) -> dict:
     return data
 
 
+def model_vars(cfg: dict, **extra) -> dict:
+    """GraphQL variables: the model id under the name the configured query declares."""
+    return {cfg.get("query_variable", "modelId"): MODEL_ID, **extra}
+
+
+def redact_signatures(obj):
+    """Drop query strings (signatures) from URLs before saving API responses."""
+    if isinstance(obj, dict):
+        return {k: redact_signatures(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [redact_signatures(v) for v in obj]
+    if isinstance(obj, str) and obj.startswith("http") and "?" in obj:
+        return obj.split("?", 1)[0] + "?<signature removed>"
+    return obj
+
+
 def dig(obj, path):
     for key in path:
         obj = obj[key]
@@ -138,7 +165,12 @@ def pano_fields(p: dict, cfg: dict) -> tuple[str, str, np.ndarray]:
 def face_urls(cfg: dict, headers: dict, pano: dict, pano_id: str) -> list[str]:
     src = pano
     if cfg.get("skybox_query"):
-        src = graphql(cfg, headers, cfg["skybox_query"], {"modelId": MODEL_ID, "panoId": pano_id})
+        src = graphql(cfg, headers, cfg["skybox_query"], model_vars(cfg, panoId=pano_id))
+    status_path = cfg.get("skybox_status_path")
+    if status_path:
+        status = dig(src, status_path)
+        if status != "available":
+            raise RuntimeError(f"skybox status for {pano_id} is {status!r}")
     urls = dig(src, cfg["face_urls_path"])
     if isinstance(urls, str):
         urls = [urls.format(face=i) for i in range(6)]
@@ -211,12 +243,23 @@ def topdown_plot(panos: list[dict], chosen: str, neighbors: set[str], path: Path
     cv2.imwrite(str(path), img)
 
 
-def write_pano_json(chosen: dict, panos: list[dict], downloaded: set[str], selected_by: str) -> dict:
+def spoken_label(chosen: dict, override: str | None) -> str | None:
+    """Name used in the spoken location cue. API pano labels are scan numbers ("22"),
+    which must not be spoken, so a label without letters is dropped."""
+    if override:
+        return override
+    lab = (chosen.get("label") or "").strip()
+    return lab if re.search(r"[A-Za-z]", lab) else None
+
+
+def write_pano_json(chosen: dict, panos: list[dict], downloaded: set[str], selected_by: str,
+                    label: str | None = None, model_name: str | None = None) -> dict:
     xy, v = horizontal(np.array([p["pos"] for p in panos]))
     pos_of = {p["id"]: xy[i] for i, p in enumerate(panos)}
     c = pos_of[chosen["id"]]
     meta = {
-        "model_id": MODEL_ID, "pano_id": chosen["id"], "label": chosen["label"] or None,
+        "model_id": MODEL_ID, "model_name": model_name, "pano_id": chosen["id"], "label": label,
+        "scan_label": chosen["label"] or None,
         "position": dict(zip("xyz", map(float, chosen["pos"]))), "vertical_axis": "xyz"[v],
         "selected_by": selected_by,
         "negatives": sorted(
@@ -257,8 +300,30 @@ def import_faces(src: Path, pano_id: str) -> None:
         cv2.imwrite(str(f), img, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
 
+# ---------------------------------------------------------------- access check
+def check_access(cfg: dict, headers: dict) -> int:
+    """Quickstart section 1 key check, then whether the key can see MODEL_ID."""
+    root = graphql(cfg, headers, cfg["key_check_query"], {}) if cfg.get("key_check_query") else None
+    if root:
+        rf = root["data"]["rootFolder"]
+        print(f"Key OK. '{rf.get('name')}' holds {rf.get('modelCountSummary')} models")
+    try:
+        d = graphql(cfg, headers, cfg["model_check_query"], model_vars(cfg))
+        m = d["data"]["model"]
+    except Exception as ex:  # noqa: BLE001
+        print(f"Model {MODEL_ID}: NOT reachable with this key ({type(ex).__name__}: {str(ex)[:300]})")
+        return 4
+    if not m:
+        print(f"Model {MODEL_ID}: NOT reachable with this key (no model returned)")
+        return 4
+    print(f"Model {MODEL_ID}: '{m.get('name')}', {len(m.get('panoLocations') or [])} panoLocations, "
+          f"visibility {m.get('visibility')}")
+    return 0
+
+
 # ---------------------------------------------------------------- main
 def main(argv=None) -> int:
+    global MODEL_ID
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--from-json", type=Path, default=None, help="use a saved panoLocations response")
     ap.add_argument("--pano-id", default=None, help="force this pano instead of the ranked pick")
@@ -266,7 +331,11 @@ def main(argv=None) -> int:
                     help="nearest scan points to download (hard negatives and competing places)")
     ap.add_argument("--candidates", type=int, default=5, help="top candidates whose faces are scored by keypoints")
     ap.add_argument("--import-faces", type=Path, default=None, help="manual fallback: directory of face_*.jpg")
+    ap.add_argument("--model", default=MODEL_ID, help="Matterport model id (default: the doc's demo model)")
+    ap.add_argument("--label", default=None, help='spoken place name, e.g. "the main lobby"')
+    ap.add_argument("--check", action="store_true", help="only check the key and whether it can see the model")
     a = ap.parse_args(argv)
+    MODEL_ID = a.model
 
     if a.import_faces:
         if not a.pano_id:
@@ -279,15 +348,18 @@ def main(argv=None) -> int:
         print(json.dumps(check_pano(PANO_DIR / a.pano_id)["chosen"], indent=1))
         return 0
 
-    cfg = load_api_config()
+    cfg = load_api_config(API_CFG)
     headers: dict = {}
+    if a.check:
+        return check_access(cfg, auth_headers(cfg, credentials(cfg)))
     if a.from_json:
         raw = json.loads(a.from_json.read_text())
     else:
         headers = auth_headers(cfg, credentials(cfg))
-        raw = graphql(cfg, headers, cfg["pano_query"], {"modelId": MODEL_ID})
+        raw = graphql(cfg, headers, cfg["pano_query"], model_vars(cfg))
         MP_DIR.mkdir(parents=True, exist_ok=True)
-        (MP_DIR / "panoLocations.json").write_text(json.dumps(raw, indent=1))
+        (MP_DIR / "panoLocations.json").write_text(json.dumps(redact_signatures(raw), indent=1))
+    model_name = dig(raw, cfg["model_name_path"]) if cfg.get("model_name_path") else None
     plist = dig(raw, cfg["pano_list_path"])
     panos = []
     for p in plist:
@@ -321,6 +393,7 @@ def main(argv=None) -> int:
         if fetch_faces(p["id"]):
             kp[p["id"]] = horizon_keypoints(PANO_DIR / p["id"])
     ranked = rank(panos, kp)
+    MP_DIR.mkdir(parents=True, exist_ok=True)
     (MP_DIR / "candidates.json").write_text(json.dumps([{k: v for k, v in r.items() if k != "raw"}
                                                         for r in ranked], indent=1))
     chosen = by_id[a.pano_id] if a.pano_id else next(r for r in ranked if r["id"] in kp or not kp)
@@ -332,13 +405,17 @@ def main(argv=None) -> int:
     neighbors = [panos[i]["id"] for i in order if panos[i]["id"] != chosen["id"]][: a.neighbors]
     downloaded = {pid for pid in neighbors if fetch_faces(pid)} | {chosen["id"]}
     why = "--pano-id override" if a.pano_id else "fetch_matterport.py ranking (label, centrality, horizon keypoints)"
-    meta = write_pano_json(chosen, panos, downloaded, why)
+    label = spoken_label(chosen, a.label)
+    meta = write_pano_json(chosen, panos, downloaded, why, label, model_name)
     topdown_plot(panos, chosen["id"], set(neighbors), MP_DIR / "topdown.png")
     rep = check_pano(PANO_DIR / chosen["id"])
     for n in meta["negatives"]:
         check_pano(PANO_DIR / n["pano_id"])
-    print(json.dumps({"PANO_ID": chosen["id"], "label": chosen["label"], "negatives": len(meta["negatives"]),
-                      "layout_ok": rep["ok"], "layout": rep["chosen"]}, indent=1))
+    print(json.dumps({"PANO_ID": chosen["id"], "label": label, "scan_label": chosen["label"],
+                      "negatives": len(meta["negatives"]), "layout_ok": rep["ok"], "layout": rep["chosen"]}, indent=1))
+    if not label:
+        print('no spoken label: the scan label is a number. Re-run with --label "the main lobby" '
+              "(or edit \"label\" in data/pano/pano.json)", file=sys.stderr)
     print(f"look at {MP_DIR/'topdown.png'}, {PANO_DIR/chosen['id']/'horizon.jpg'} and "
           f"{PANO_DIR/chosen['id']/'contact_cross.jpg'} before the demo")
     return 0
