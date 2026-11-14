@@ -76,9 +76,18 @@ from refs import (  # noqa: E402
     load_refs,
 )
 
-try:  # Part 1's contract. Until it lands on main, identical local shapes are used.
-    from protocol import Detection, Location  # type: ignore  # noqa: F401
+# Part 1's contract types. Loaded as server.localize (Part 1's server), they come from
+# server.protocol, as HANDOFF.md asks; loaded as a script or by the tools, from the same
+# file as a top-level module; before Part 1 is merged, identical local shapes are used.
+Detection = Location = None  # type: ignore[assignment,misc]
+try:
+    if __package__ == "server":
+        from .protocol import Detection, Location  # type: ignore  # noqa: F401
+    else:
+        from protocol import Detection, Location  # type: ignore  # noqa: F401
 except Exception:  # noqa: BLE001
+    Detection = Location = None  # type: ignore[assignment,misc]
+if Location is None:
 
     @dataclass
     class Detection:  # type: ignore[no-redef]
