@@ -105,10 +105,15 @@ class CueEngine:
         self._last_cue = -math.inf
         self._last_location = None
         self._pending_location = None
+        self._pending_nav = None  # latest guidance instruction not yet spoken (priority 1)
         self._prefix = uuid.uuid4().hex
         self._serial = 0
 
-    def update(self, detections, location: Location, now_s: float) -> Cue | None:
+    def update(self, detections, location: Location, now_s: float, nav_text: str | None = None) -> Cue | None:
+        """nav_text: a new guidance instruction (server.entrance_nav); spoken after hazards,
+        before the location announcement. A newer instruction replaces an unspoken one."""
+        if nav_text:
+            self._pending_nav = nav_text
         current = {}
         objects = {}
         for detection in detections:
@@ -164,6 +169,8 @@ class CueEngine:
                     priority == 0,
                 )
             candidates.append((priority, -area, key, text))
+        if self._pending_nav and now_s - self._last_cue >= self.min_gap_s - 1e-9:
+            candidates.append((1, 0.0, ("nav",), self._pending_nav))
         if self._pending_location and now_s - self._last_cue >= self.min_gap_s - 1e-9:
             state_key, text = self._pending_location
             candidates.append((2, 0.0, ("location", *state_key), text))
@@ -189,6 +196,8 @@ class CueEngine:
         priority, _, key, text = min(candidates, key=lambda item: (item[0], item[1], item[3]))
         if priority == 2:
             self._pending_location = None
+        elif key == ("nav",):
+            self._pending_nav = None
         else:
             self._last_key[key] = now_s
         self._last_cue = now_s

@@ -17,6 +17,8 @@ dependencies = [
   "lightglue @ git+https://github.com/cvg/LightGlue.git@5a650c444718caffc2669dc0094cde908f42dd73",
   "trimesh>=4,<5",
   "rtree>=1,<2",
+  "google-genai>=3.3.0",
+  "python-multipart>=0.0.33",
 ]
 
 [build-system]
