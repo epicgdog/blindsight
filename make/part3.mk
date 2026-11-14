@@ -2,15 +2,16 @@
 # Part 1's Makefile includes this file; it also runs standalone:
 #   make -f make/part3.mk p3-test
 #
-# Python runner: Part 1's uv project in server/ once it exists, otherwise an ephemeral
-# uv environment with just what the Part 3 tools need. Override with P3_PY=python.
+# Python runner: a lightweight uv environment with just what the Part 3 tools need
+# (numpy, OpenCV, Pillow, pytest, certifi). Deliberately NOT Part 1's server project:
+# that one pins PyTorch, which has no Intel-Mac builds, and no Part 3 tool needs it.
 # Without PyTorch the localizer uses SIFT and the weight-free retriever (it falls back
-# automatically); recent PyTorch has no Intel-Mac builds, so that is the Intel-Mac setup.
-# Only p3-weights installs PyTorch/transformers/LightGlue.
+# automatically). Only p3-weights installs PyTorch/transformers/LightGlue.
+# Override with P3_PY=python (or P3_PY="uv run python" for the server's environment).
 P3_DEPS    := --with numpy --with opencv-python-headless --with pillow --with pytest --with certifi
 P3_ML_DEPS := --with torch --with transformers --with "lightglue @ git+https://github.com/cvg/LightGlue.git"
-P3_PY      ?= $(if $(wildcard server/pyproject.toml),uv run --project server python,uv run --no-project $(P3_DEPS) python)
-P3_PY_ML   ?= $(if $(wildcard server/pyproject.toml),uv run --project server python,uv run --no-project $(P3_DEPS) $(P3_ML_DEPS) python)
+P3_PY      ?= uv run --no-project $(P3_DEPS) python
+P3_PY_ML   ?= uv run --no-project $(P3_DEPS) $(P3_ML_DEPS) python
 
 .PHONY: p3-help p3-access p3-list p3-fetch p3-try p3-hfov p3-refs p3-synth p3-calibrate p3-eval p3-feed p3-video \
         p3-weights p3-test p3-selfcheck p3-all p3-check
