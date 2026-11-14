@@ -158,3 +158,22 @@ def test_try_photos_reports_each_photo(data, room, tmp_path, monkeypatch, capsys
     rows = [ln for ln in out.splitlines() if ln.startswith("IMG_")]
     assert [r.split()[1] for r in rows] == ["YES", "YES", "no"]
     assert "2 of 3 photos matched" in out
+
+
+def test_match_view_ranks_places_and_outlines_the_frame_on_the_pano(loc, room):
+    """The viewer's live ranking and footprint box come from last_debug["match"]."""
+    loc.reset()
+    gt = 200.0
+    for i in range(3):
+        out = loc.update(frame(room, "room_p0", gt + 5 * i), [], (gt + 77.0) % 360)
+    match = loc.last_debug["match"]
+    ranking = match["ranking"]
+    assert ranking and ranking[0]["place"] == "room_p0"  # the true scan point ranks first
+    assert ranking == sorted(ranking, key=lambda r: -r["sim"])
+    assert len({r["place"] for r in ranking}) == len(ranking)
+    if out.state == LOCKED:
+        poly = match["footprint"]
+        assert poly and all(len(p) == 2 for p in poly)
+        cx = sum(p[0] for p in poly) / len(poly)
+        # the box is centred near the matched yaw (x = yaw / 360, unwrapped)
+        assert abs(((cx * 360 - out.yaw_deg + 180) % 360) - 180) < 8

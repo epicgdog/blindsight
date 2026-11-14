@@ -41,3 +41,34 @@ export const refStrip = (urls, best) =>
   }));
 
 export const clock = (ms) => new Date(ms).toTimeString().slice(0, 8);
+
+// ---- live pano ranking and footprint ----
+export const placeName = (id, info = {}) => {
+  const p = info[id];
+  if (p?.room) return p.room;
+  if (p?.label) return `Scan ${p.label}`;
+  return String(id).slice(0, 8);
+};
+
+export const thumbUrl = (place) => `/data/pano/${place}/face_2.jpg`;
+
+export const simPercent = (sim) => Math.max(0, Math.min(100, Math.round(sim * 100)));
+
+// Server order is already best-first; mark the pano the localizer is locked to.
+export const rankRows = (match, activePano, info = {}) =>
+  (match?.ranking ?? []).map((r, i) => ({
+    rank: i + 1,
+    place: r.place,
+    name: placeName(r.place, info),
+    percent: simPercent(r.sim),
+    inliers: r.inliers ?? 0,
+    here: r.place === activePano,
+    thumb: thumbUrl(r.place),
+  }));
+
+// Footprint x is unwrapped around the view centre, so draw copies at -1, 0 and +1 panos wide.
+export function footprintPaths(poly, w, h) {
+  if (!poly?.length) return [];
+  const pts = (dx) => poly.map(([x, y]) => `${+(x * w + dx).toFixed(2)},${+(y * h).toFixed(2)}`).join(" ");
+  return [pts(-w), pts(0), pts(w)];
+}

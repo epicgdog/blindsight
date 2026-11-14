@@ -1,7 +1,7 @@
-import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock } from "./logic.js";
+import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, footprintPaths } from "./logic.js";
 
 const $ = (id) => document.getElementById(id);
-let history = [], cueLog = [], times = [], faces = [];
+let history = [], cueLog = [], times = [], faces = [], placeInfo = {}, mapPano = null;
 
 function render(r) {
   if (r.jpeg_b64) $("live-frame").src = "data:image/jpeg;base64," + r.jpeg_b64;
@@ -26,6 +26,7 @@ function render(r) {
     $("spark-line").setAttribute("points", sparklinePoints(history, 200, 40));
     renderRefs(loc.best_ref);
   }
+  renderMatch(r);
   const now = Date.now();
   cueLog = appendCue(cueLog, r.cue, now);
   $("cue-log").replaceChildren(...cueLog.map((c) => {
@@ -36,6 +37,53 @@ function render(r) {
   times = [...times, now].slice(-30);
   $("fps").textContent = `${fpsFromTimes(times).toFixed(1)} fps`;
   if (r.server_ms) $("latency").textContent = `server ${r.server_ms.total.toFixed(0)} ms`;
+}
+
+const rowEls = new Map();
+
+function renderMatch(r) {
+  if (r.jpeg_b64) $("cmp-live").src = "data:image/jpeg;base64," + r.jpeg_b64;
+  const rows = rankRows(r.match, r.location?.pano_id, placeInfo);
+  const list = $("rank-list");
+  const seen = new Set();
+  for (const row of rows) {
+    seen.add(row.place);
+    let li = rowEls.get(row.place);
+    if (!li) {
+      li = document.createElement("li");
+      li.innerHTML = '<span class="rank-n"></span><img class="rank-thumb" alt=""><div><span class="rank-name"></span><div class="bar"><i></i></div></div><span class="rank-pct"></span><span class="rank-in"></span>';
+      li.querySelector("img").onerror = (e) => { e.target.style.visibility = "hidden"; };
+      li.querySelector("img").src = row.thumb;
+      rowEls.set(row.place, li);
+      list.append(li);
+    }
+    li.className = "rank-row" + (row.here ? " here" : "");
+    li.style.order = row.rank;
+    li.querySelector(".rank-n").textContent = row.rank;
+    li.querySelector(".rank-name").textContent = row.name;
+    li.querySelector(".bar i").style.width = row.percent + "%";
+    li.querySelector(".rank-pct").textContent = row.percent + "%";
+    li.querySelector(".rank-in").textContent = row.inliers ? row.inliers + " in" : "";
+  }
+  for (const [place, li] of rowEls) {
+    if (!seen.has(place)) { li.remove(); rowEls.delete(place); }
+  }
+  if (rows.length) {
+    $("cmp-top").src = rows[0].thumb;
+    $("cmp-top-name").textContent = rows[0].name;
+  }
+  const pano = r.location?.pano_id;
+  if (pano && pano !== mapPano) {
+    mapPano = pano;
+    $("equirect").src = `/data/pano/${pano}/equirect.jpg`;
+  }
+  const svg = $("footprint");
+  svg.replaceChildren();
+  for (const pts of footprintPaths(r.match?.footprint, 2048, 1024)) {
+    const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+    poly.setAttribute("points", pts);
+    svg.append(poly);
+  }
 }
 
 function renderRefs(best) {
@@ -81,5 +129,5 @@ setInterval(async () => {
   } catch {}
 }, 2000);
 
-fetch("/api/pano").then((r) => r.json()).then((p) => { faces = p.faces; }).catch(() => {});
+fetch("/api/pano").then((r) => r.json()).then((p) => { faces = p.faces; placeInfo = p.places ?? {}; }).catch(() => {});
 connect();
