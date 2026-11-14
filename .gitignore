@@ -17,3 +17,5 @@ node_modules/
 dist/
 slides/backup.mp4
 data/
+app/ios/
+app/modules/blindsight-tracking/ios/Models/

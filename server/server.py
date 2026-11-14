@@ -43,6 +43,7 @@ from server.minimap import scan_points
 from server.navigation import navigation_router
 from server.protocol import FramePacket, ProtocolError, decode_frame
 from server.record import SessionRecorder
+from server.spatial import spatial_router
 
 log = logging.getLogger("blindsight")
 AGENT_ON = env_bool("AGENT", True)  # voice agent + entrance guidance (demo)
@@ -178,7 +179,9 @@ class Processed:
 class Pipeline:
     """All mutable ML state stays on one dedicated worker, never the event loop."""
 
-    def __init__(self, settings: Settings, detector, localizer, agent_state: AgentState | None = None):
+    def __init__(
+        self, settings: Settings, detector, localizer, agent_state: AgentState | None = None
+    ):
         self.settings = settings
         self.agent_state = agent_state
         self.detector = detector
@@ -222,7 +225,9 @@ class Pipeline:
         nav_text = None
         if self.agent_state is not None:
             try:
-                nav_text = self.agent_state.on_frame(localized, match, described, self.location.to_dict(), jpeg)
+                nav_text = self.agent_state.on_frame(
+                    localized, match, described, self.location.to_dict(), jpeg
+                )
             except Exception:  # guidance must never break the frame pipeline
                 log.exception("Agent state update failed")
         cue = self.cues.update(detections, self.location, localized, nav_text=nav_text)
@@ -503,7 +508,10 @@ def create_app(
 
     app = FastAPI(title="Blindsight", lifespan=lifespan)
     app.include_router(navigation_router(settings.data_dir))
-    app.include_router(agent_router(lambda: getattr(getattr(app.state, "runtime", None), "agent", None)))
+    app.include_router(
+        agent_router(lambda: getattr(getattr(app.state, "runtime", None), "agent", None))
+    )
+    app.include_router(spatial_router(settings.data_dir))
 
     @app.get("/")
     async def index():
@@ -707,7 +715,10 @@ def create_app(
                 runtime.agent.state.reset()
                 runtime.agent.reset()
             pipeline = await runtime.work(
-                Pipeline, settings, runtime.detector, localizer,
+                Pipeline,
+                settings,
+                runtime.detector,
+                localizer,
                 runtime.agent.state if runtime.agent is not None else None,
             )
             tasks.append(asyncio.create_task(process()))
