@@ -254,6 +254,14 @@ class Dinov2Embedder:
         return np.concatenate(out).astype(np.float32)
 
 
+class Dinov2BaseEmbedder(Dinov2Embedder):
+    """DINOv2-base (768 hidden, 1536-d vector): same pooling and 224 px input as small,
+    about 2.8x the compute (~25 ms per frame on Apple MPS)."""
+
+    name = "dinov2-base"
+    MODEL_ID = "facebook/dinov2-base"
+
+
 class OpenClipEmbedder:
     """open_clip ViT-B-32 image embedding (documented retrieval fallback)."""
 
@@ -310,9 +318,10 @@ class ClassicEmbedder:
 def make_embedder(name: str = "auto") -> tuple[object, list[str]]:
     """Retriever in the documented order: DINOv2-small, open_clip ViT-B-32, classic."""
     name = (name or "auto").lower()
-    builders = {"dinov2-small": Dinov2Embedder, "openclip-vit-b-32": OpenClipEmbedder, "classic-hog": ClassicEmbedder}
-    aliases = {"dinov2": "dinov2-small", "openclip": "openclip-vit-b-32", "open_clip": "openclip-vit-b-32",
-               "classic": "classic-hog"}
+    builders = {"dinov2-small": Dinov2Embedder, "dinov2-base": Dinov2BaseEmbedder,
+                "openclip-vit-b-32": OpenClipEmbedder, "classic-hog": ClassicEmbedder}
+    aliases = {"dinov2": "dinov2-small", "dinov2-b": "dinov2-base", "openclip": "openclip-vit-b-32",
+               "open_clip": "openclip-vit-b-32", "classic": "classic-hog"}
     name = aliases.get(name, name)
     if name != "auto":
         return builders[name](), []
