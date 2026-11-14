@@ -12,10 +12,11 @@ Branch `part-3` (pull request epicgdog/blindsight#2). Commits are prefixed `part
 | Demo model | **Princeton - Rabinowitz Hall, `P3S6VUTP3qB`** (66 scan points, two floors), now the default in `fetch_matterport.py`. The doc's lobby model `6sd6A5r5EVp` answers not.found with the hackathon key (14,945 models visible); the CoStar track team was asked to add it |
 | Chosen scan point | scan 34, `az0h181td1h01x8x9gxhnp47a`, ground floor, in the large open area Matterport labels "Other" (scans 3, 4, 13, 15, 17, 20, 33, 34). Matterport labels every other room in this building "Hallway", so the room names could not identify a lobby. **To confirm:** the live demo must happen at this spot |
 | Spoken name | "Rabinowitz Hall" (`label` in `data/pano/pano.json`) |
-| Code | done; 49 tests pass (`make -f make/part3.mk p3-test`) |
+| Code | done; 52 tests pass (`make -f make/part3.mk p3-test`) |
 | Phase 3 acceptance | faces downloaded for the chosen scan point and its 20 nearest neighbours (by 3D distance), six equal 2048 px squares, layout verified automatically for all 21 (seam ratio 0.081 for scan 34), contact sheets opened on the laptop. Mirroring needs a person to confirm text reads forwards. `GET /api/pano` is Part 1's (`refs.pano_info()` is ready) |
 | Phase 4 targets | **met on simulated frames** from real Matterport data: Rabinowitz Hall scan 34 (results at the end of this file) and, earlier, the quickstart's house `zvKHR9DHNjJ` (commit `acc250e`). Report them as simulated |
 | Real phone frames | **not yet tested**. `make -f make/part3.mk p3-try DIR=...` runs the localizer on iPhone photos taken at the spot (and elsewhere, which must not match); `p3-hfov DIR=...` estimates the iPhone's real horizontal FOV from them |
+| Integration with Parts 1 and 2 (2026-11-14) | merged into `main` (PRs #1, #2, #3). Before the merge, checked on the combined branch: 176 Python and 40 Node tests pass (2 Part 2 tunnel tests fail only on Linux). Part 1's server with `LOCALIZER=real` locked in 0.76 s on the simulated feed, `/api/pano` serves label, thresholds and 72 refs, and `make self-check` passes everything but the phone-speech item. Speed targets failed only on the CPU-only cloud machine (YOLO about 1 frame/s there) and must be re-measured on the demo laptop |
 | Laptop | Intel Mac: SIFT and the weight-free retriever (no PyTorch builds for Intel Macs); 8.5 Hz measured |
 
 ### Reproduce on a laptop
