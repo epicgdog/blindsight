@@ -106,7 +106,7 @@ const scanName = (p) => (p?.room ? p.room : p?.label != null ? `Scan ${p.label}`
 // Markers for the active floor: the active place, ranked candidates, recent trail, other points.
 export function mapMarkers(map, activeId, ranking, trail, w, h) {
   if (!map?.points?.length) return { floor: null, name: "", markers: [] };
-  if (map.plan) return planMarkers(map, activeId, ranking, trail);
+  if (map.walls?.length) return wallMarkers(map, activeId, ranking, trail);
   const ranked = (ranking ?? []).map((r) => r.place);
   const focus = activeId ?? ranked[0] ?? null;
   const floor = floorOfPlace(map.points, focus) ?? 0;
@@ -132,42 +132,40 @@ export function errorText(status, body) {
   return status >= 500 ? `Server error (${status})` : `Request refused (${status})`;
 }
 
-// ---- minimap with a floor-plan image (floor 1 only) ----
-// Matterport plans: pixel x = (world x - origin.x) * resolution, pixel y = height - (world y - origin.y) * resolution.
-export const planPoint = (p, plan) => ({
-  x: +((p.x - plan.origin.x) * plan.resolution).toFixed(2),
-  y: +(plan.height - (p.y - plan.origin.y) * plan.resolution).toFixed(2),
-});
 
-export function planViewBox(points, plan, pad = 150) {
-  const px = points.map((p) => planPoint(p, plan));
-  const x1 = Math.max(0, Math.min(...px.map((p) => p.x)) - pad);
-  const y1 = Math.max(0, Math.min(...px.map((p) => p.y)) - pad);
-  const x2 = Math.min(plan.width, Math.max(...px.map((p) => p.x)) + pad);
-  const y2 = Math.min(plan.height, Math.max(...px.map((p) => p.y)) + pad);
-  return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
-}
 
-function planMarkers(map, activeId, ranking, trail) {
-  const plan = map.plan;
+// ---- minimap from the mesh: wall outlines and scan points, floor 1 only ----
+const WALL_PX_PER_M = 40;
+const WALL_MARGIN_M = 2;
+
+function wallMarkers(map, activeId, ranking, trail) {
   const ranked = (ranking ?? []).map((r) => r.place);
-  const here = map.points.filter((p) => p.floor === plan.floor);
+  const floor = 0;
+  const here = map.points.filter((p) => p.floor === floor);
+  const xs = here.map((p) => p.x), ys = here.map((p) => p.y);
+  const minX = Math.min(...xs) - WALL_MARGIN_M, maxX = Math.max(...xs) + WALL_MARGIN_M;
+  const minY = Math.min(...ys) - WALL_MARGIN_M, maxY = Math.max(...ys) + WALL_MARGIN_M;
+  const px = (x) => +((x - minX) * WALL_PX_PER_M).toFixed(2);
+  const py = (y) => +((maxY - y) * WALL_PX_PER_M).toFixed(2); // north (larger y) at the top
   const activePoint = map.points.find((p) => p.id === activeId);
-  const otherFloor = !!activePoint && activePoint.floor !== plan.floor;
+  const estimateId = activePoint ? null : ranked[0] ?? null;
+  const focus = map.points.find((p) => p.id === (activeId ?? estimateId));
+  const otherFloor = !!focus && focus.floor !== floor;
   const markers = here.map((p) => {
     let kind = "point";
     if (p.id === activeId) kind = "active";
+    else if (p.id === estimateId) kind = "estimate";
     else if (ranked.slice(0, 3).includes(p.id)) kind = "candidate";
     else if ((trail ?? []).includes(p.id)) kind = "trail";
-    const px = planPoint(p, plan);
-    return { id: p.id, kind, x: px.x, y: px.y, rank: ranked.indexOf(p.id) + 1 };
+    return { id: p.id, kind, x: px(p.x), y: py(p.y), rank: ranked.indexOf(p.id) + 1 };
   });
+  const walls = map.walls.map(([x1, y1, x2, y2]) => [px(x1), py(y1), px(x2), py(y2)]);
   return {
-    floor: plan.floor,
-    name: activePoint ? scanName(activePoint) : "",
+    floor,
+    name: focus ? scanName(focus) : "",
     markers,
-    viewBox: planViewBox(here, plan),
-    plan,
+    walls,
+    viewBox: { x: 0, y: 0, w: +((maxX - minX) * WALL_PX_PER_M).toFixed(2), h: +((maxY - minY) * WALL_PX_PER_M).toFixed(2) },
     otherFloor,
   };
 }

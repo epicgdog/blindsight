@@ -88,18 +88,18 @@ function renderMinimap(r) {
   if (!mapData) return;
   const active = r.location?.state === "LOCKED" ? r.location?.pano_id : null;
   if (active) trail = pushTrail(trail, active, 8);
-  const { floor, name, markers, viewBox, plan, otherFloor } = mapMarkers(mapData, active, r.match?.ranking, trail, 400, 400);
+  const { floor, name, markers, walls, viewBox, otherFloor } = mapMarkers(mapData, active, r.match?.ranking, trail, 400, 400);
   const svg = $("minimap");
   const NS = "http://www.w3.org/2000/svg";
-  const scale = viewBox ? viewBox.w / 400 : 1; // dot sizes are in plan pixels when a plan is shown
   const nodes = [];
-  if (plan && viewBox) {
+  let scale = 1;
+  if (viewBox && walls) {
     svg.setAttribute("viewBox", `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
-    const img = document.createElementNS(NS, "image");
-    img.setAttribute("href", plan.url);
-    img.setAttribute("x", 0); img.setAttribute("y", 0);
-    img.setAttribute("width", plan.width); img.setAttribute("height", plan.height);
-    nodes.push(img);
+    scale = viewBox.w / 400;
+    const path = document.createElementNS(NS, "path");
+    path.setAttribute("class", "mm-walls");
+    path.setAttribute("d", walls.map(([x1, y1, x2, y2]) => `M${x1} ${y1}L${x2} ${y2}`).join(""));
+    nodes.push(path);
   } else {
     svg.setAttribute("viewBox", "0 0 400 400");
   }
@@ -107,12 +107,13 @@ function renderMinimap(r) {
     const c = document.createElementNS(NS, "circle");
     c.setAttribute("class", `mm-dot mm-${m.kind}`);
     c.setAttribute("cx", m.x); c.setAttribute("cy", m.y);
-    c.setAttribute("r", (m.kind === "active" ? 12 : m.kind === "point" ? 5 : 8) * scale);
+    c.setAttribute("r", ({ active: 12, estimate: 11, point: 5 }[m.kind] ?? 8) * scale);
     nodes.push(c);
   }
   svg.replaceChildren(...nodes);
   $("mm-floor").textContent = floor == null ? "" : `Floor ${floor + 1}`;
-  $("mm-place").textContent = otherFloor ? `${name} (another floor)` : name;
+  const tag = otherFloor ? " (another floor)" : active ? "" : name ? " (estimate)" : "";
+  $("mm-place").textContent = name ? `${name}${tag}` : "";
 }
 
 function renderRefs(best) {

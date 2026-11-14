@@ -19,30 +19,42 @@ def _walk(value, out: list[dict]) -> None:
             _walk(child, out)
 
 
-def floor_plan(data_dir, floor: int) -> dict | None:
-    """Floor-plan image info from data/matterport/floorplan_floor<N>.json, if its image was downloaded."""
-    base = Path(data_dir) / "matterport"
+WALL_MARGIN_M = 3.0  # keep wall lines this far around the floor's scan points
+
+
+def floor_walls(data_dir, points: list[dict], floor: int = 0) -> list[list[float]]:
+    """Wall segments from data/matterport/walls_floor<N>.json near that floor's scan points."""
+    here = [p for p in points if p.get("floor") == floor]
+    if not here:
+        return []
     try:
-        meta = json.loads((base / f"floorplan_floor{floor + 1}.json").read_text())
-        if not (base / meta["file"]).is_file():
-            return None
-        return {
-            "url": f"/api/floorplan/{floor}",
-            "width": int(meta["width"]),
-            "height": int(meta["height"]),
-            "resolution": float(meta["resolution"]),
-            "origin": {"x": float(meta["origin"]["x"]), "y": float(meta["origin"]["y"])},
-            "floor": floor,
-            "label": meta.get("label", f"Floor {floor + 1}"),
-        }
+        raw = json.loads((Path(data_dir) / "matterport" / f"walls_floor{floor + 1}.json").read_text())
+        segs = raw["segments"]
     except (OSError, ValueError, KeyError, TypeError):
-        return None
+        return []
+    x0 = min(p["x"] for p in here) - WALL_MARGIN_M
+    x1 = max(p["x"] for p in here) + WALL_MARGIN_M
+    y0 = min(p["y"] for p in here) - WALL_MARGIN_M
+    y1 = max(p["y"] for p in here) + WALL_MARGIN_M
+
+    def inside(x, y):
+        return x0 <= x <= x1 and y0 <= y <= y1
+
+    out = []
+    for seg in segs:
+        try:
+            ax, ay, bx, by = (float(v) for v in seg)
+        except (TypeError, ValueError):
+            continue
+        if inside(ax, ay) or inside(bx, by):
+            out.append([ax, ay, bx, by])
+    return out
 
 
 def scan_points(data_dir) -> dict:
     """All scan points with floor numbers and map bounds, from data/matterport/panoLocations.json."""
     data_dir = Path(data_dir)
-    empty = {"points": [], "floors": [], "bounds": None, "plan": None}
+    empty = {"points": [], "floors": [], "bounds": None, "walls": []}
     try:
         raw = json.loads((data_dir / "matterport" / "panoLocations.json").read_text())
     except (OSError, ValueError):
@@ -101,4 +113,4 @@ def scan_points(data_dir) -> dict:
     ]
     xs, ys = [p["x"] for p in pts], [p["y"] for p in pts]
     bounds = {"min_x": min(xs), "max_x": max(xs), "min_y": min(ys), "max_y": max(ys)}
-    return {"points": pts, "floors": floors, "bounds": bounds, "plan": floor_plan(data_dir, 0)}
+    return {"points": pts, "floors": floors, "bounds": bounds, "walls": floor_walls(data_dir, pts, 0)}
