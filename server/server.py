@@ -93,6 +93,13 @@ def _accepts_attitude(localizer) -> bool:
     return "pitch_deg" in params and "roll_deg" in params
 
 
+def _accepts_param(localizer, name: str) -> bool:
+    try:
+        return name in inspect.signature(localizer.update).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 def make_localizer(settings: Settings, detector=None):
     module = "server.localize_stub" if settings.localizer == "stub" else "server.localize"
     try:
@@ -189,9 +196,10 @@ class Pipeline:
         # processed frame preserves heading prediction, failure counts and warm-up evidence.
         hdr = packet.header
         if _accepts_attitude(self.localizer):
-            self.location = self.localizer.update(
-                rgb, detections, hdr.heading_deg, pitch_deg=hdr.pitch_deg, roll_deg=hdr.roll_deg
-            )
+            kw = {"pitch_deg": hdr.pitch_deg, "roll_deg": hdr.roll_deg}
+            if _accepts_param(self.localizer, "moving"):
+                kw["moving"] = hdr.moving
+            self.location = self.localizer.update(rgb, detections, hdr.heading_deg, **kw)
         else:
             self.location = self.localizer.update(rgb, detections, hdr.heading_deg)
         localized = time.monotonic()

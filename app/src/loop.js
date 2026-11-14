@@ -18,6 +18,7 @@ export async function runCaptureLoop({
       const header = { seq, ts_ms: now(), heading_deg: getHeading() ?? null, w: shot.w, h: shot.h };
       const att = getAttitude();
       if (att) Object.assign(header, { pitch_deg: att.pitch_deg, roll_deg: att.roll_deg });
+      if (att && typeof att.moving === "boolean") header.moving = att.moving;
       await send(shot.bytes, header);
       await sleep(0); // yield to the event loop so socket events are processed
     } catch (e) {

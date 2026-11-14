@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { attitudeFromGravity } from "../../src/attitude.js";
+import { attitudeFromGravity, createMotionDetector } from "../../src/attitude.js";
 
 // iOS CoreMotion gravity in device axes (x right, y toward the top edge, z out of the screen), in g.
 const near = (a, b, tol = 0.5) => Math.abs(a - b) <= tol;
@@ -39,4 +39,27 @@ test("missing or zero readings give no attitude", () => {
   assert.equal(attitudeFromGravity(null), null);
   assert.equal(attitudeFromGravity({ x: 0, y: 0, z: 0 }), null);
   assert.equal(attitudeFromGravity({ x: NaN, y: -1, z: 0 }), null);
+});
+
+test("motion detector: standing still, then walking, then still again", () => {
+  const d = createMotionDetector();
+  let t = 0, out = null;
+  const feed = (n, f) => { for (let i = 0; i < n; i++, t += 100) out = d.push(f(i), t); return out; };
+  const still = (i) => ({ x: 0.003 * Math.sin(i), y: -1 + 0.004 * Math.cos(i * 1.7), z: 0.002 });
+  // steps at ~2 Hz: magnitude bounces about +/-0.2 g
+  const walk = (i) => ({ x: 0.05 * Math.sin(i), y: -1 - 0.2 * Math.sin((i * Math.PI) / 2.5), z: 0.05 });
+  assert.equal(feed(4, still), null, "not enough samples yet");
+  assert.equal(feed(20, still), false);
+  assert.equal(feed(20, walk), true);
+  assert.equal(feed(30, still), false);
+});
+
+test("motion detector: turning in place (gravity direction changes slowly) stays still", () => {
+  const d = createMotionDetector();
+  let out = null;
+  for (let i = 0; i < 40; i++) {
+    const a = (i / 40) * 0.5; // tilt sweep; magnitude stays 1 g
+    out = d.push({ x: Math.sin(a) * 0.2, y: -Math.sqrt(1 - (Math.sin(a) * 0.2) ** 2), z: 0 }, i * 100);
+  }
+  assert.equal(out, false);
 });

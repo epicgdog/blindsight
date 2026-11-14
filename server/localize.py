@@ -125,6 +125,10 @@ PITCH_GATE_DEG = float(os.environ.get("P3_PITCH_GATE_DEG", "15"))
 # Metric position (depth from the scan mesh + PnP) for a verified match. Needs
 # data/matterport/pano_frame.json (tools/calibrate_pano_frame.py). P3_POSITION=0 turns it off.
 POSITION_ON = os.environ.get("P3_POSITION", "1") != "0"
+# Phone reports it is not walking (accelerometer): the user is on the same spot, so the
+# place may not switch and position fixes are averaged into one held point. A fix farther
+# than this from the held point is treated as an outlier while still.
+STILL_REJECT_M = float(os.environ.get("P3_STILL_REJECT_M", "0.5"))
 MAX_ONSITE_NEG = 200  # frames from Part 1's POST /api/capture/neg used as competing views
 ONSITE_NEG = "onsite_negatives"  # place name for those frames
 COMP_YAWS = tuple(range(0, 360, 15))  # competitor views: every 15 degrees at pitch 0
@@ -651,6 +655,7 @@ class Localizer:
         self.n_onsite = 0
         self.last_debug: dict = {}
         self.position: PositionSolver | None = None
+        self._anchor: dict | None = None  # held position while the phone is still
         if POSITION_ON:
             try:
                 self.position = PositionSolver.load(self.data_dir)
@@ -989,7 +994,8 @@ class Localizer:
         )
 
     # -- contract ----------------------------------------------------------------
-    def update(self, frame_rgb, detections, heading_deg, pitch_deg=None, roll_deg=None) -> Location:
+    def update(self, frame_rgb, detections, heading_deg, pitch_deg=None, roll_deg=None,
+               moving: bool | None = None) -> Location:
         with self._lock:
             t0 = time.perf_counter()
             self._n += 1
@@ -1008,8 +1014,9 @@ class Localizer:
             if matched and best is not None and pitch_deg is not None and best.pitch is not None:
                 if abs(float(best.pitch) - float(pitch_deg)) > PITCH_GATE_DEG:
                     matched, imu_rejected = False, True
+            still = moving is False
             if self.multi:
-                matched, best = self._hold_place(matched, best)
+                matched, best = self._hold_place(matched, best, hold=still)
             yaw = None
             conf = 0.0
             if matched and best is not None:
@@ -1021,6 +1028,7 @@ class Localizer:
                     conf = min(1.0, best.inliers / (2.0 * max(1, self.s.N_MIN)))
             st = self._sm.step(matched, yaw, heading, conf)
             fix = self._position_fix(fe, best, frame_rgb.shape) if matched and self.mode != "retrieval" else None
+            position = self._held_position(fix, best if matched else None, still)
             ref = best or fe.top_demo
             pano_id, label = self.pano_id, self.label
             if self.multi:
@@ -1039,8 +1047,9 @@ class Localizer:
                 best_ref=ref.name if ref else None,
             )
             self.last_debug = {
-                "match": self._match_view(fe, best, ref, st.yaw, frame_rgb.shape, fix),
+                "match": self._match_view(fe, best, ref, st.yaw, frame_rgb.shape, position),
                 "position": fix.to_dict() if fix is not None else None,
+                "moving": moving,
                 "imu_rejected": imu_rejected,
                 "imu_pitch": pitch_deg, "imu_roll": roll_deg,
                 "matched": matched, "embed": round(fe.embed_ms, 1), "extract": round(fe.extract_ms, 1),
@@ -1051,8 +1060,9 @@ class Localizer:
             }
             return loc
 
-    def _hold_place(self, matched: bool, best):
-        """Multi-place hysteresis: a different place must win on SWITCH_FRAMES frames in a row."""
+    def _hold_place(self, matched: bool, best, hold: bool = False):
+        """Multi-place hysteresis: a different place must win on SWITCH_FRAMES frames in a row.
+        hold (the phone is not walking): the current place cannot change at all."""
         if not matched or best is None:
             self._votes = {}
             return matched, best
@@ -1060,6 +1070,9 @@ class Localizer:
         if self._place is None or place == self._place:
             self._place, self._votes = place, {}
             return True, best
+        if hold:
+            self._votes = {}
+            return False, best
         n = self._votes.get(place, 0) + 1
         self._votes = {place: n}
         if n >= SWITCH_FRAMES:
@@ -1067,6 +1080,33 @@ class Localizer:
             self._sm.reset()  # yaw history belongs to the old place
             return True, best
         return False, best  # hold the current place until the new one is confirmed
+
+    def _held_position(self, fix, best, still: bool) -> dict | None:
+        """Position for the viewer. Walking (or unknown): this frame's fix. Still: the running
+        mean of the fixes since the phone stopped, outliers dropped, kept between fixes."""
+        a = self._anchor
+        if not still or (a is not None and best is not None and best.place != a["place"]):
+            self._anchor = a = None
+        new = None
+        if fix is not None and fix.world is not None and best is not None:
+            new = np.asarray(fix.world, float)
+            if still:
+                if a is None:
+                    self._anchor = a = {"place": best.place, "sum": new.copy(), "n": 1}
+                elif float(np.linalg.norm(new - a["sum"] / a["n"])) <= STILL_REJECT_M:
+                    a["sum"] += new
+                    a["n"] += 1
+        if a is not None:
+            m = a["sum"] / a["n"]
+            return {"place": a["place"], "x": round(float(m[0]), 3), "y": round(float(m[1]), 3),
+                    "z": round(float(m[2]), 3), "held": True, "n": a["n"],
+                    "offset_m": round(float(fix.offset_m), 3) if fix is not None else None,
+                    "inliers": int(fix.inliers) if fix is not None else 0}
+        if new is None:
+            return None
+        return {"place": best.place, "x": round(float(new[0]), 3), "y": round(float(new[1]), 3),
+                "z": round(float(new[2]), 3), "held": False, "n": 1,
+                "offset_m": round(fix.offset_m, 3), "inliers": fix.inliers}
 
     def _position_fix(self, fe, best, shape):
         """Metric camera position for the verified best match, or None."""
@@ -1089,7 +1129,7 @@ class Localizer:
         W = self.ref_size[0]
         return (max(1, int(round(h * W / w))), W) if w != W else (h, w)
 
-    def _match_view(self, fe, best, ref, yaw, shape, fix=None) -> dict | None:
+    def _match_view(self, fe, best, ref, yaw, shape, position=None) -> dict | None:
         """For the viewer: places ranked by retrieval score, and where the frame sits on the pano."""
         try:
             sims = fe.sims
@@ -1109,10 +1149,8 @@ class Localizer:
                     yaw if yaw is not None else best.yaw, pitch, roll, self.s.HFOV_DEG, h / max(1, w)
                 )
             out = {"ranking": ranking, "footprint": footprint}
-            if fix is not None and fix.world is not None and best is not None:
-                out["position"] = {"place": best.place, "x": round(float(fix.world[0]), 3),
-                                   "y": round(float(fix.world[1]), 3), "z": round(float(fix.world[2]), 3),
-                                   "offset_m": round(fix.offset_m, 3), "inliers": fix.inliers}
+            if position is not None:
+                out["position"] = position
             return out
         except Exception:  # visualisation must never break localization
             return None
@@ -1177,6 +1215,7 @@ class Localizer:
             self._n = 0
             self._sims = None
             self._place, self._votes = None, {}
+            self._anchor = None
 
     def info(self) -> dict:
         return {

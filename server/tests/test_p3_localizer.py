@@ -369,3 +369,56 @@ def test_position_absent_without_depth(loc, room):
         assert "position" not in (loc.last_debug.get("match") or {})
     finally:
         loc.position = saved
+
+
+def test_still_phone_holds_and_averages_position(loc, room):
+    """moving=False: fixes are averaged into one held point and an outlier fix is ignored;
+    moving=True drops the hold."""
+    from p3_room import HI, LO
+    from position import BoxDepth, PlaceFrame, PositionSolver
+
+    saved = loc.position
+    loc.position = PositionSolver(BoxDepth(LO, HI), {pid: PlaceFrame(pos3(pid)) for pid in IDS})
+    try:
+        loc.reset()
+        here = pos3("room_p0") + np.array([0.2, 0.0, 0.1])
+        held = []
+        for yaw in (30, 40, 50):
+            loc.update(room.render(here, yaw, 0, 0, (540, 720), 55.0), [], None, moving=False)
+            held.append(loc.last_debug["match"]["position"])
+        assert all(p["held"] for p in held) and held[-1]["n"] == 3
+        # an outlier fix while still does not move the held point
+        anchor = np.array([held[-1][k] for k in "xyz"])
+        loc._anchor["sum"] = anchor * loc._anchor["n"]  # pin exactly for the check below
+        from position import PositionFix
+        orig = loc._position_fix
+        loc._position_fix = lambda *a: PositionFix(np.zeros(3), np.eye(3), 50, 60, 1.0, anchor + [2.0, 0, 0])
+        try:
+            loc.update(room.render(here, 60, 0, 0, (540, 720), 55.0), [], None, moving=False)
+        finally:
+            loc._position_fix = orig
+        p = loc.last_debug["match"]["position"]
+        assert p["held"] and p["n"] == 3 and np.allclose([p[k] for k in "xyz"], anchor, atol=1e-3)
+        # walking: the hold is dropped
+        loc.update(room.render(here, 70, 0, 0, (540, 720), 55.0), [], None, moving=True)
+        p = loc.last_debug["match"]["position"]
+        assert p["held"] is False and loc._anchor is None
+    finally:
+        loc.position = saved
+
+
+def test_still_phone_does_not_switch_place(loc):
+    """_hold_place with hold=True keeps the current place no matter how many frames vote."""
+    from localize import Cand
+
+    loc.reset()
+    a = Cand(0, "a", "room_p0", True, 0.9, inliers=200, grid=9)
+    b = Cand(1, "b", "room_p1", True, 0.9, inliers=300, grid=9)
+    assert loc._hold_place(True, a) == (True, a)
+    for _ in range(5):
+        ok, _ = loc._hold_place(True, b, hold=True)
+        assert not ok and loc._place == "room_p0"
+    for _ in range(5):
+        ok, _ = loc._hold_place(True, b, hold=False)
+    assert loc._place == "room_p1"
+    loc.reset()
