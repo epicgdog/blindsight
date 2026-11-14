@@ -12,3 +12,7 @@ data/negatives/
 data/models/
 data/reports/
 runs/
+node_modules/
+.expo/
+dist/
+slides/backup.mp4
