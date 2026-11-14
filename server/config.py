@@ -57,7 +57,8 @@ class Settings:
     pano_id: str | None = os.getenv("PANO_ID") or None
     pano_label: str | None = os.getenv("PANO_LABEL") or None
     max_message_bytes: int = 4 * 1024 * 1024
-    max_image_pixels: int = 12_000_000
+    max_image_pixels: int = 50_000_000  # hard cap; phone photos are 12 MP and get downscaled
+    max_frame_side: int = 1280  # longest side after decoding; larger frames are downscaled
     viewer_fps: float = 10.0
     metrics_window_s: float = 60.0
     send_timeout_s: float = 2.0
@@ -88,6 +89,8 @@ class Settings:
             raise ValueError("Cooldown must be nonnegative; MIN_GAP_S must be >= 0.8")
         if not 0 < self.viewer_fps <= 10 or not 1 <= self.port <= 65535:
             raise ValueError("Invalid viewer frequency or port")
+        if self.max_frame_side < 64:
+            raise ValueError("max_frame_side must be at least 64")
         if self.metrics_window_s <= 0 or self.send_timeout_s <= 0:
             raise ValueError("Metrics window and send timeout must be positive")
         if not re.fullmatch(r"[A-Za-z0-9]{6,32}", self.matterport_model_id):

@@ -12,7 +12,8 @@ import { runCaptureLoop } from "./src/loop";
 import { encodeFrame } from "./src/protocol";
 import { normalizeServerUrl } from "./src/address";
 import { base64ToBytes } from "./src/base64";
-import { PICTURE_OPTIONS, PICTURE_SIZE } from "./src/camera";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
+import { PICTURE_OPTIONS, PICTURE_SIZE, SAVE_OPTIONS, resizePlan } from "./src/camera";
 
 const KEY = "blindsight.server";
 const DEFAULT = process.env.EXPO_PUBLIC_SERVER_URL ?? "";
@@ -29,6 +30,7 @@ export default function App() {
   const client = useRef(null);
   const speaking = useRef(false);
   const frames = useRef([]);
+  const sizeLogged = useRef(false);
 
   useEffect(() => {
     (async () => {
@@ -69,7 +71,16 @@ export default function App() {
       isRunning: () => runningRef.current,
       capture: async () => {
         const p = await camera.current.takePictureAsync(PICTURE_OPTIONS);
-        return { bytes: base64ToBytes(p.base64), w: p.width, h: p.height };
+        // Resize to 720 px on the short side on the phone, then read the JPEG bytes back.
+        const ctx = ImageManipulator.manipulate(p.uri);
+        const plan = resizePlan(p.width, p.height);
+        if (plan) ctx.resize(plan);
+        const out = await (await ctx.renderAsync()).saveAsync({ ...SAVE_OPTIONS, format: SaveFormat.JPEG });
+        if (!sizeLogged.current) {
+          sizeLogged.current = true;
+          console.log(`camera ${p.width}x${p.height} -> sending ${out.width}x${out.height}`);
+        }
+        return { bytes: base64ToBytes(out.base64), w: out.width, h: out.height };
       },
       send: async (bytes, header) => {
         await client.current.sendFrame(encodeFrame(header, bytes));

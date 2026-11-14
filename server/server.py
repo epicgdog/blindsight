@@ -54,9 +54,20 @@ def decode_image(packet: FramePacket, settings: Settings) -> tuple[np.ndarray, b
                     source.format != "JPEG"
                     or source.width * source.height > settings.max_image_pixels
                 ):
+                    log.warning(
+                        "Rejected %s frame %dx%d (limit %d pixels)",
+                        source.format,
+                        source.width,
+                        source.height,
+                        settings.max_image_pixels,
+                    )
                     raise ProtocolError("Invalid JPEG format or image dimensions")
+                # JPEG draft mode decodes at a reduced scale, far faster for 12 MP photos.
+                source.draft("RGB", (settings.max_frame_side, settings.max_frame_side))
                 source.load()
                 upright = ImageOps.exif_transpose(source).convert("RGB")
+                if max(upright.size) > settings.max_frame_side:
+                    upright.thumbnail((settings.max_frame_side, settings.max_frame_side))
                 # The real decoded size is authoritative. Expo may report pre-rotation sizes.
                 rgb = np.array(upright)
                 buffer = io.BytesIO()
