@@ -422,3 +422,10 @@ def test_still_phone_does_not_switch_place(loc):
         ok, _ = loc._hold_place(True, b, hold=False)
     assert loc._place == "room_p1"
     loc.reset()
+
+
+def test_pano_view_follows_the_highest_confidence_candidate(loc, room):
+    loc.reset()
+    loc.update(frame(room, "room_p0", 30), [], None)
+    m = loc.last_debug["match"]
+    assert m["pano"] == "room_p0" and m["pano_inliers"] > 0 and m["footprint"]

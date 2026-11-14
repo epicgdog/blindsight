@@ -74,7 +74,8 @@ function renderMatch(r) {
     $("cmp-top").src = rows[0].thumb;
     $("cmp-top-name").textContent = rows[0].name;
   }
-  const pano = r.location?.pano_id;
+  // Highest-confidence pano for this frame (most verified inliers), else the reported place.
+  const pano = r.match?.pano ?? r.location?.pano_id;
   if (pano && pano !== mapPano) {
     mapPano = pano;
     $("equirect").src = `/data/pano/${pano}/equirect.jpg`;
