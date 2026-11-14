@@ -12,7 +12,7 @@ P3_ML_DEPS := --with torch --with transformers --with "lightglue @ git+https://g
 P3_PY      ?= $(if $(wildcard server/pyproject.toml),uv run --project server python,uv run --no-project $(P3_DEPS) python)
 P3_PY_ML   ?= $(if $(wildcard server/pyproject.toml),uv run --project server python,uv run --no-project $(P3_DEPS) $(P3_ML_DEPS) python)
 
-.PHONY: p3-help p3-access p3-list p3-fetch p3-refs p3-synth p3-calibrate p3-eval p3-feed p3-video \
+.PHONY: p3-help p3-access p3-list p3-fetch p3-try p3-hfov p3-refs p3-synth p3-calibrate p3-eval p3-feed p3-video \
         p3-weights p3-test p3-selfcheck p3-all p3-check
 
 p3-help: ## list the Part 3 targets
@@ -47,6 +47,12 @@ p3-video: ## synthetic feed as an mp4 (one full turn) for the backup video
 
 p3-weights: ## download DINOv2 + SuperPoint/LightGlue weights and prove they load offline
 	$(P3_PY_ML) server/localize.py --prefetch
+
+p3-try: ## run the localizer on real photos: DIR=~/Desktop/at_spot (JPEG/PNG; iPhone at 1x, portrait)
+	$(P3_PY) server/localize.py --try "$(DIR)"
+
+p3-hfov: ## estimate the phone camera's horizontal FOV from photos taken at the scan point (DIR=...)
+	$(P3_PY) tools/calibrate.py --estimate-hfov "$(DIR)"
 
 p3-selfcheck: ## PASS/FAIL: localizer loads (pano, refs, models) and calibration exists
 	$(P3_PY) server/localize.py --selfcheck
