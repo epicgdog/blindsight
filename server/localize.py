@@ -102,7 +102,9 @@ LOCKED, UNCERTAIN, LOST = "LOCKED", "UNCERTAIN", "LOST"
 TOPK_DEMO = 3  # global-retrieval proposals from the locked pano (doc: top 3)
 TOPK_DEMO_BOW = 2  # extra proposals from the local-feature vocabulary
 TOPK_COMP = 3  # proposals from competing scan points (vocabulary)
-MAX_COMPETITORS = int(os.environ.get("P3_MAX_COMPETITORS", "8"))
+MAX_COMPETITORS = int(os.environ.get("P3_MAX_COMPETITORS", "20"))
+MAX_ONSITE_NEG = 200  # frames from Part 1's POST /api/capture/neg used as competing views
+ONSITE_NEG = "onsite_negatives"  # place name for those frames
 COMP_YAWS = tuple(range(0, 360, 15))  # competitor views: every 15 degrees at pitch 0
 MAX_ONSITE = 150  # cap on warm-up references
 
@@ -587,6 +589,8 @@ class Localizer:
                 self.competitors.append(cid)
             except FileNotFoundError as ex:
                 self.notes.append(f"competitor {cid} skipped: {ex}")
+        if competitors == "auto" or (isinstance(competitors, (list, tuple)) and ONSITE_NEG in competitors):
+            self._load_onsite_negatives()
         self._emb = self._embed_refs([r for r in self._refs])
         self._bow = BowIndex([r.feats for r in self._refs])
         self._is_demo = np.array([r.demo for r in self._refs])
@@ -608,7 +612,7 @@ class Localizer:
         if competitors in (None, "none", False, 0):
             return []
         if competitors != "auto":
-            return [c for c in competitors if c != self.pano_id]
+            return [c for c in competitors if c not in (self.pano_id, ONSITE_NEG)]
         negs = sorted(meta.get("negatives", []), key=lambda n: n.get("dist_m", 1e9))
         ids = [n["pano_id"] for n in negs if (self.data_dir / "pano" / n["pano_id"] / "face_1.jpg").exists()]
         return ids[:MAX_COMPETITORS]
@@ -633,6 +637,28 @@ class Localizer:
         for v, f in zip(views, feats):
             w, h = v.image.shape[1], v.image.shape[0]
             self._refs.append(_Ref(v, place, demo, f, intrinsics(w, h, v.hfov)))
+
+    def _load_onsite_negatives(self) -> None:
+        """Frames captured away from the scan point (Part 1: POST /api/capture/neg ->
+        data/negatives/) become competing views: a live frame that matches one of them at
+        least as well as the pano is not at the scan point. Their pose is unknown and
+        unused; only their inlier counts matter. Disable with P3_ONSITE_NEGATIVES=0."""
+        d = self.data_dir / "negatives"
+        if os.environ.get("P3_ONSITE_NEGATIVES") == "0" or not d.is_dir():
+            return
+        files = sorted(d.glob("*.jpg"))[-MAX_ONSITE_NEG:]
+        for f in files:
+            img = cv2.imread(str(f), cv2.IMREAD_COLOR)
+            if img is None:
+                continue
+            raw = self._prep(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            h, w = raw.shape[:2]
+            view = RefView(f"neg_{f.stem}", 0.0, 0.0, raw, "onsite_neg", 0.0, self.s.HFOV_DEG)
+            feats = extract_features(self.matcher, normalize_contrast(raw))
+            self._refs.append(_Ref(view, ONSITE_NEG, False, feats, intrinsics(w, h, self.s.HFOV_DEG)))
+        if files:
+            self.competitors.append(ONSITE_NEG)
+            self.notes.append(f"{len(files)} on-site negative frames used as competing views")
 
     def _cached_features(self, pdir: Path, views: list[RefView]) -> list[Features]:
         """Reference keypoints, cached per place/matcher/size (LightGlue on CPU is slow)."""
@@ -837,6 +863,25 @@ class Localizer:
             return True
 
     # -- extras for Part 1 (self-check, /api/pano, eval) -------------------------
+    def add_negative(self, frame_rgb) -> None:
+        """Use a frame captured away from the scan point (POST /api/capture/neg) as a
+        competing view right away, without a restart."""
+        with self._lock:
+            raw = self._prep(frame_rgb)
+            norm = normalize_contrast(raw)
+            h, w = raw.shape[:2]
+            k = int((~self._is_demo).sum())
+            view = RefView(f"neg_live{k:04d}", 0.0, 0.0, raw, "onsite_neg", 0.0, self.s.HFOV_DEG)
+            feats = extract_features(self.matcher, norm)
+            self._refs.append(_Ref(view, ONSITE_NEG, False, feats, intrinsics(w, h, self.s.HFOV_DEG)))
+            self._emb = np.vstack([self._emb, self.embedder.embed_batch([norm])])
+            self._bow.add(feats)
+            self._is_demo = np.append(self._is_demo, False)
+            self._is_pano_demo = np.append(self._is_pano_demo, False)
+            if ONSITE_NEG not in self.competitors:
+                self.competitors.append(ONSITE_NEG)
+            self._sims = None
+
     def apply_settings(self, s: Settings) -> None:
         """Swap thresholds (e.g. raw evaluation -> calibrated) and reset temporal state."""
         with self._lock:

@@ -113,3 +113,29 @@ def test_retrieval_only_mode_runs(data, room):
                   mode="retrieval", verbose=False)
     out = [L.update(frame(room, "room_p0", 90 + i), [], None) for i in range(3)]
     assert out[-1].inliers == 0 and L.last_debug["verify"] == 0.0
+
+
+def test_onsite_negative_frames_become_competing_views(tmp_path, room):
+    """A scan point that is not a competing place can falsely lock (measured in the
+    stress test); frames captured there via /api/capture/neg close that gap."""
+    import cv2
+
+    data = write_dataset(tmp_path, room, S=384, ids=["room_p0", "room_p1", "room_p3"])
+    neg_dir = data / "negatives"
+    neg_dir.mkdir()
+    for k, yaw in enumerate(range(0, 360, 20)):
+        img = room.render(pos3("room_p3"), yaw, 0, 0, (540, 720), 55.0)
+        cv2.imwrite(str(neg_dir / f"cap_{k:03d}.jpg"), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+    L = Localizer(data, settings=settings(), matcher=SiftMatcher(), embedder=ClassicEmbedder(),
+                  competitors=["room_p1", "onsite_negatives"], verbose=False)
+    assert "onsite_negatives" in L.competitors and "room_p3" not in L.competitors
+    for start in (95, 185, 275):
+        L.reset()
+        for i in range(6):
+            assert L.update(frame(room, "room_p3", start + 4 * i), [], None).state != LOCKED
+    L.reset()
+    states = [L.update(frame(room, "room_p0", 140 + 4 * i), [], None).state for i in range(4)]
+    assert LOCKED in states  # the locked pano still locks
+    n = L.info()["n_competitor_refs"]
+    L.add_negative(frame(room, "room_p3", 10))  # live capture, no restart
+    assert L.info()["n_competitor_refs"] == n + 1
