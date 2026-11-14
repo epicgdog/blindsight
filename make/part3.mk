@@ -4,6 +4,9 @@
 #
 # Python runner: Part 1's uv project in server/ once it exists, otherwise an ephemeral
 # uv environment with just what the Part 3 tools need. Override with P3_PY=python.
+# Without PyTorch the localizer uses SIFT and the weight-free retriever (it falls back
+# automatically); recent PyTorch has no Intel-Mac builds, so that is the Intel-Mac setup.
+# Only p3-weights installs PyTorch/transformers/LightGlue.
 P3_DEPS    := --with numpy --with opencv-python-headless --with pillow --with pytest
 P3_ML_DEPS := --with torch --with transformers --with "lightglue @ git+https://github.com/cvg/LightGlue.git"
 P3_PY      ?= $(if $(wildcard server/pyproject.toml),uv run --project server python,uv run --no-project $(P3_DEPS) python)
@@ -28,10 +31,10 @@ p3-synth: ## simulated positives, hard negatives and walkthroughs -> data/synthe
 	$(P3_PY) tools/make_synthetic.py
 
 p3-calibrate: ## T_HI, T_LO, N_MIN, PLACE_RATIO from the calib split -> data/calibration.json
-	$(P3_PY_ML) tools/calibrate.py
+	$(P3_PY) tools/calibrate.py
 
 p3-eval: ## Phase 4 numbers on the held-out split, written into NOTES-part3.md
-	$(P3_PY_ML) tools/eval_localization.py --write-notes NOTES-part3.md
+	$(P3_PY) tools/eval_localization.py --write-notes NOTES-part3.md
 
 p3-feed: ## synthetic feed frames + frames.jsonl for the sim client -> data/synthetic/feed
 	$(P3_PY) tools/synthetic_feed.py --out data/synthetic/feed
@@ -43,7 +46,7 @@ p3-weights: ## download DINOv2 + SuperPoint/LightGlue weights and prove they loa
 	$(P3_PY_ML) server/localize.py --prefetch
 
 p3-selfcheck: ## PASS/FAIL: localizer loads (pano, refs, models) and calibration exists
-	$(P3_PY_ML) server/localize.py --selfcheck
+	$(P3_PY) server/localize.py --selfcheck
 
 p3-test: ## Part 3 unit + pipeline tests (procedural room, no Matterport data needed)
 	$(P3_PY) -m pytest -q server/tests/test_p3_state_machine.py server/tests/test_p3_geometry.py \
