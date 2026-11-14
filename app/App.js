@@ -6,7 +6,6 @@ import { setAudioModeAsync } from "expo-audio";
 import * as Location from "expo-location";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
-import { Accelerometer } from "expo-sensors";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient } from "./src/client";
 import { createCueSpeaker } from "./src/speech";
@@ -16,7 +15,6 @@ import { normalizeServerUrl } from "./src/address";
 import { base64ToBytes } from "./src/base64";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { AUDIO_MODE, speechOptions } from "./src/audio";
-import { isUprightPortrait, smoothGravity } from "./src/orientation";
 import { PICTURE_OPTIONS, PICTURE_SIZE, SAVE_OPTIONS, resizePlan } from "./src/camera";
 
 const KEY = "blindsight.server";
@@ -35,11 +33,6 @@ export default function App() {
   const speaking = useRef(false);
   const frames = useRef([]);
   const sizeLogged = useRef(false);
-  const [upright, setUpright] = useState(false);
-  const uprightRef = useRef(false);
-  const sensorOk = useRef(true);
-  const blockedSince = useRef(0);
-  const lastWarn = useRef(0);
 
   useEffect(() => {
     (async () => {
@@ -54,26 +47,6 @@ export default function App() {
         });
       }
     })().catch((e) => console.log("init", e?.message));
-  }, []);
-
-  // Only send frames while the phone is held upright in portrait (accelerometer gravity cone).
-  useEffect(() => {
-    let sub = null, gravity = null, cancelled = false;
-    (async () => {
-      if (!(await Accelerometer.isAvailableAsync())) { sensorOk.current = false; return; }
-      Accelerometer.setUpdateInterval(100);
-      if (cancelled) return;
-      sub = Accelerometer.addListener((g) => {
-        gravity = smoothGravity(gravity, g);
-        const ok = isUprightPortrait(gravity);
-        if (ok !== uprightRef.current) {
-          uprightRef.current = ok;
-          blockedSince.current = ok ? 0 : Date.now();
-          setUpright(ok);
-        }
-      });
-    })().catch((e) => { sensorOk.current = false; console.log("accelerometer", e?.message); });
-    return () => { cancelled = true; sub?.remove(); };
   }, []);
 
   const speaker = useRef(
@@ -120,14 +93,6 @@ export default function App() {
         if (f.length > 1) setFps(((f.length - 1) * 1000) / (f[f.length - 1] - f[0]));
       },
       getHeading: () => heading.current,
-      canCapture: () => !sensorOk.current || uprightRef.current,
-      onBlocked: () => {
-        const now = Date.now();
-        if (now - blockedSince.current > 2000 && now - lastWarn.current > 8000) {
-          lastWarn.current = now;
-          speaker.announce("Hold the phone upright");
-        }
-      },
       onTiming: (t) => { if (t.slow) console.log(`slow capture ${t.captureMs} ms: lower quality/size`); },
     });
   }, [address, perm, askPerm, speaker]);
@@ -145,7 +110,7 @@ export default function App() {
         placeholder="server address (wss://… or LAN ip:8000)" placeholderTextColor="#888" />
       <Button title={running ? "Stop" : "Start"} onPress={running ? stop : start} />
       <Text style={s.status}>
-        {status.connected ? "connected" : "disconnected"} · {status.state ?? "–"} · {fps.toFixed(1)} fps · {upright ? "upright" : "tilted: hold upright"}
+        {status.connected ? "connected" : "disconnected"} · {status.state ?? "–"} · {fps.toFixed(1)} fps
       </Text>
       <CameraView ref={camera} style={s.preview} facing="back" pictureSize={PICTURE_SIZE} />
     </View>
