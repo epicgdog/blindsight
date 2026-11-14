@@ -1,4 +1,4 @@
-import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, footprintPaths, maskPolygons, maskSummary, mapMarkers, pushTrail, yawText, errorText } from "./logic.js";
+import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, footprintPaths, mapMarkers, pushTrail, yawText, errorText } from "./logic.js";
 
 const $ = (id) => document.getElementById(id);
 let history = [], cueLog = [], times = [], faces = [], placeInfo = {}, mapPano = null, mapData = null, trail = [], lastResult = null;
@@ -101,17 +101,6 @@ function renderMinimap(r) {
   $("mm-place").textContent = name;
 }
 
-function renderMasks(regions) {
-  const layer = $("mask-layer");
-  layer.replaceChildren();
-  for (const pts of maskPolygons(regions, 2048, 1024)) {
-    const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-    poly.setAttribute("points", pts);
-    layer.append(poly);
-  }
-  $("mask-note").textContent = maskSummary((regions ?? []).length);
-}
-
 function renderRefs(best) {
   const strip = $("ref-strip"); strip.replaceChildren();
   for (const r of refStrip(faces, best)) {
@@ -165,5 +154,5 @@ setInterval(async () => {
   } catch {}
 }, 2000);
 
-fetch("/api/pano").then((r) => r.json()).then((p) => { faces = p.faces; placeInfo = p.places ?? {}; mapData = p.map ?? null; renderMasks(p.masked_regions); if (lastResult) { renderMatch(lastResult); renderMinimap(lastResult); } }).catch(() => {});
+fetch("/api/pano").then((r) => r.json()).then((p) => { faces = p.faces; placeInfo = p.places ?? {}; mapData = p.map ?? null; if (lastResult) { renderMatch(lastResult); renderMinimap(lastResult); } }).catch(() => {});
 connect();

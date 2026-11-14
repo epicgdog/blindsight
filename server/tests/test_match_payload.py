@@ -83,15 +83,15 @@ def test_pano_metadata_lists_place_names_for_the_viewer(tmp_path):
 # ---- reference-view masking wiring ----------------------------------------------------
 
 
-def test_masking_is_on_by_default_and_configurable(monkeypatch):
+def test_masking_is_off_by_default_and_can_be_enabled(monkeypatch):
     import importlib
 
     import server.config as config
 
     monkeypatch.delenv("MASK_REFS", raising=False)
-    assert importlib.reload(config).Settings().mask_refs is True
-    monkeypatch.setenv("MASK_REFS", "0")
     assert importlib.reload(config).Settings().mask_refs is False
+    monkeypatch.setenv("MASK_REFS", "1")
+    assert importlib.reload(config).Settings().mask_refs is True
     monkeypatch.delenv("MASK_REFS")
     importlib.reload(config)
 

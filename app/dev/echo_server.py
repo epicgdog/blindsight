@@ -132,10 +132,7 @@ def pano():
         ],
         "floors": [{"floor": 0, "z": 1.3, "count": 4}, {"floor": 1, "z": 5.3, "count": 1}],
         "bounds": {"min_x": -4.0, "max_x": 6.0, "min_y": -2.0, "max_y": 4.0},
-    }, "masked_regions": [
-        [[0.40, 0.55], [0.44, 0.55], [0.44, 0.70], [0.40, 0.70]],
-        [[0.62, 0.50], [0.66, 0.50], [0.66, 0.68], [0.62, 0.68]],
-    ], "faces": [f"/pano/face_{i}.jpg" for i in range(6)],
+    }, "faces": [f"/pano/face_{i}.jpg" for i in range(6)],
             "thresholds": {"locked": 0.7, "uncertain": 0.4}}
 
 

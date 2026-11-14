@@ -11,9 +11,15 @@ VIEWER = ROOT / "server/viewer"
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 
+def test_viewer_has_no_masking_ui():
+    html = (VIEWER / "index.html").read_text() + (VIEWER / "app.js").read_text()
+    for word in ("mask-layer", "mask-note", "masked_regions", "maskPolygons", "ignored"):
+        assert word not in html, word
+
+
 def test_ranking_and_footprint_panels_present():
     html = (VIEWER / "index.html").read_text()
-    for el in ("rank-list", "cmp-live", "cmp-top", "pano-map", "equirect", "footprint", "mask-layer", "mask-note", "minimap", "mm-floor", "mm-place"):
+    for el in ("rank-list", "cmp-live", "cmp-top", "pano-map", "equirect", "footprint", "minimap", "mm-floor", "mm-place"):
         assert f'id="{el}"' in html, el
 
 
@@ -76,8 +82,7 @@ def test_viewer_renders_live_pano_ranking_and_footprint(server):
     assert names[0] == "Hallway" and "Other / Hallway" in names
     assert re.search(r'id="footprint".*<polygon', dom, re.S)
     assert re.search(r'id="cmp-live"[^>]*src="data:image/jpeg', dom)
-    assert re.search(r'id="mask-layer".*<polygon', dom, re.S)  # ignored people/furniture drawn
-    assert re.search(r'id="mask-note"[^>]*>\s*\d+ regions? ignored', dom)
+    assert "mask-layer" not in dom and "ignored" not in dom  # no masking overlay
 
 
 @pytest.mark.browser
