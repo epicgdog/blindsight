@@ -20,11 +20,12 @@ import { attitudeFromGravity, createMotionDetector, smoothGravity } from "./src/
 import { ackBody, createAckTracker, sendAck, speechAckUrl } from "./src/ack";
 import { PICTURE_OPTIONS, PICTURE_SIZE, SAVE_OPTIONS, resizePlan } from "./src/camera";
 import { MIN_CLIP_MS, RECORD_MODE, agentTalkUrl, postClip } from "./src/talk";
+import NativeNavigation, { trackingModule } from "./NativeNavigation";
 
 const KEY = "blindsight.server";
 const DEFAULT = process.env.EXPO_PUBLIC_SERVER_URL ?? "";
 
-export default function App() {
+function LegacyApp() {
   const [perm, askPerm] = useCameraPermissions();
   const [address, setAddress] = useState(DEFAULT);
   const [running, setRunning] = useState(false);
@@ -203,6 +204,10 @@ export default function App() {
       </Pressable>
     </View>
   );
+}
+
+export default function App() {
+  return process.env.EXPO_PUBLIC_NATIVE_NAVIGATION === "1" && trackingModule ? <NativeNavigation /> : <LegacyApp />;
 }
 
 const s = StyleSheet.create({
