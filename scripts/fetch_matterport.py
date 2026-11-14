@@ -52,9 +52,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
 from refs import check_pano  # noqa: E402
 
-# Exact property selected by the user. Do not silently substitute another space
-# when API credentials cannot access this model. --model is an explicit override.
-MODEL_ID = "6sd6A5r5EVp"
+# User-confirmed API model ID for Princeton - Rabinowitz Hall.
+# The public viewer ID 6sd6A5r5EVp differs. --model is an explicit override.
+MODEL_ID = "P3S6VUTP3qB"
 DATA = ROOT / "data"
 MP_DIR = DATA / "matterport"
 PANO_DIR = DATA / "pano"

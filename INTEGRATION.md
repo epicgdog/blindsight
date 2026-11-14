@@ -1,13 +1,17 @@
 # Combined development baseline
 
+Updated property access: the user confirmed API model ID P3S6VUTP3qB.
+Authenticated access succeeds: Princeton - Rabinowitz Hall, 66 panorama locations,
+visibility public. The fetcher now defaults to this confirmed API ID. The earlier
+not.found findings below refer to the public viewer ID, not the confirmed API ID.
+
 This branch combines part-1, part_2 and part-3. The uv workspace retains the server
 member and adds Part 2 QR and presentation dependencies. Both Python test trees
 remain enabled. Run make setup, make check and make part2-test.
 
 The selected property is https://my.matterport.com/models/6sd6A5r5EVp (Princeton –
-Rabinowitz Hall). The fetcher defaults to this exact ID. Earlier Part 3 notes describe
-testing P3S6VUTP3qB with its key; that is not evidence that the selected model is
-accessible. Never silently replace the selected property.
+Rabinowitz Hall). Its user-confirmed API ID is P3S6VUTP3qB, now the fetcher default.
+Never silently replace the selected property.
 
 Run `uv run python scripts/fetch_matterport.py --check` before downloading. API access
 requires MATTERPORT_API_KEY and MATTERPORT_API_TOKEN in git-ignored .env.local.
