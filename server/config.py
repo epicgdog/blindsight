@@ -31,6 +31,7 @@ MATTERPORT_MODEL_ID = os.getenv("MATTERPORT_MODEL_ID", "P3S6VUTP3qB")
 DEFAULT_PANO_ID = "1k478kza39tbfu1uhbttg5ybb"
 DEFAULT_PANO_LABEL = "Rabinowitz Hall"
 LOCALIZER = os.getenv("LOCALIZER", "stub")
+CANDIDATE_PLACES = os.getenv("CANDIDATE_PLACES", "all")  # "all", a number N (nearest N), or "1"
 MASK_REFS = env_bool("MASK_REFS", True)  # mask people/furniture out of the pano reference views
 
 
@@ -47,6 +48,7 @@ class Settings:
     record: bool = RECORD
     localizer: str = LOCALIZER
     mask_refs: bool = MASK_REFS
+    candidate_places: str = CANDIDATE_PLACES
     detector: str = os.getenv("DETECTOR", "yolo")
     yolo_device: str = os.getenv("YOLO_DEVICE", "auto")
     yolo_model: str = os.getenv("YOLO_MODEL", "yolo11n.pt")
@@ -91,6 +93,8 @@ class Settings:
             raise ValueError("Cooldown must be nonnegative; MIN_GAP_S must be >= 0.8")
         if not 0 < self.viewer_fps <= 10 or not 1 <= self.port <= 65535:
             raise ValueError("Invalid viewer frequency or port")
+        if self.candidate_places != "all" and not self.candidate_places.isdigit():
+            raise ValueError("CANDIDATE_PLACES must be 'all' or a number")
         if self.max_frame_side < 64:
             raise ValueError("max_frame_side must be at least 64")
         if self.metrics_window_s <= 0 or self.send_timeout_s <= 0:

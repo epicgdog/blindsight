@@ -122,6 +122,16 @@ def pano():
         "6sd6A5r5EVp-demo": {"room": "Hallway", "label": "0"},
         "echo-neighbour-1": {"room": "Other / Hallway", "label": "34"},
         "echo-neighbour-2": {"room": "Stairwell", "label": "12"},
+    }, "map": {
+        "points": [
+            {"id": "6sd6A5r5EVp-demo", "label": "0", "room": "Hallway", "x": 0.0, "y": 0.0, "z": 1.3, "floor": 0},
+            {"id": "echo-neighbour-1", "label": "34", "room": "Other / Hallway", "x": 3.0, "y": -2.0, "z": 1.3, "floor": 0},
+            {"id": "echo-neighbour-2", "label": "12", "room": "Stairwell", "x": -4.0, "y": 3.0, "z": 1.3, "floor": 0},
+            {"id": "echo-neighbour-3", "label": "7", "room": None, "x": 6.0, "y": 4.0, "z": 1.3, "floor": 0},
+            {"id": "echo-upper", "label": "9", "room": "Upper", "x": 1.0, "y": 1.0, "z": 5.3, "floor": 1},
+        ],
+        "floors": [{"floor": 0, "z": 1.3, "count": 4}, {"floor": 1, "z": 5.3, "count": 1}],
+        "bounds": {"min_x": -4.0, "max_x": 6.0, "min_y": -2.0, "max_y": 4.0},
     }, "masked_regions": [
         [[0.40, 0.55], [0.44, 0.55], [0.44, 0.70], [0.40, 0.70]],
         [[0.62, 0.50], [0.66, 0.50], [0.66, 0.68], [0.62, 0.68]],

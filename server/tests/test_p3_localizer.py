@@ -227,3 +227,81 @@ def test_masked_localizer_still_locks_at_the_scan_point(masked_loc, room):
         out = masked_loc.update(frame(room, "room_p0", gt), [], (gt + 77.0) % 360)
         states.append(out.state)
     assert LOCKED in states
+
+
+# ---- multi-place mode: every pano is a candidate place -----------------------------------
+
+
+@pytest.fixture(scope="module")
+def multi(data):
+    return Localizer(
+        data, settings=settings(), matcher=SiftMatcher(), embedder=ClassicEmbedder(),
+        verbose=False, places="all",
+    )
+
+
+def test_every_pano_is_a_candidate_place_in_multi_mode(multi):
+    assert set(multi.candidate_places) == set(IDS)
+    assert all(r.demo for r in multi._refs if r.view.source == "pano")
+    assert multi.competitors == []  # nothing left to be only a distractor
+
+
+def test_single_mode_keeps_one_candidate_place(loc):
+    assert loc.candidate_places == ["room_p0"]
+
+
+def _lock_at(L, room, pid, yaw0=200, n=6):
+    L.reset()
+    out = None
+    for i in range(n):
+        gt = yaw0 + 6 * i
+        out = L.update(frame(room, pid, gt), [], (gt + 77.0) % 360)
+    return out
+
+
+@pytest.mark.parametrize("pid", IDS)
+def test_multi_mode_reports_the_place_the_frames_came_from(multi, room, pid):
+    out = _lock_at(multi, room, pid)
+    assert out.state == LOCKED
+    assert out.pano_id == pid
+    assert out.label  # a speakable place name
+
+
+def test_multi_mode_ranking_puts_the_true_place_first(multi, room):
+    _lock_at(multi, room, "room_p3")
+    ranking = multi.last_debug["match"]["ranking"]
+    assert ranking[0]["place"] == "room_p3"
+
+
+def test_place_does_not_switch_on_a_single_frame(multi, room):
+    out = _lock_at(multi, room, "room_p0")
+    assert out.pano_id == "room_p0"
+    one = multi.update(frame(room, "room_p3", 230), [], 307.0)
+    assert one.pano_id == "room_p0", "one frame from elsewhere must not move the place"
+
+
+def test_place_switches_after_consistent_frames(multi, room):
+    _lock_at(multi, room, "room_p0")
+    out = None
+    for i in range(8):
+        gt = 220 + 6 * i
+        out = multi.update(frame(room, "room_p3", gt), [], (gt + 77.0) % 360)
+    assert out.pano_id == "room_p3" and out.state == LOCKED
+
+
+def test_embeddings_are_cached_per_place(data):
+    calls = []
+
+    class Counting(ClassicEmbedder):
+        def embed_batch(self, imgs):
+            calls.append(len(imgs))
+            return super().embed_batch(imgs)
+
+    for cached in (data / "pano").glob("*/cache/emb_*.npy"):
+        cached.unlink()  # earlier fixtures already filled the cache
+    kw = dict(settings=settings(), matcher=SiftMatcher(), embedder=Counting(), verbose=False, places="all")
+    Localizer(data, **kw)
+    first = sum(calls)
+    calls.clear()
+    Localizer(data, **kw)
+    assert sum(calls) < first, "second start must reuse cached reference embeddings"

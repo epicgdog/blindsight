@@ -1,9 +1,10 @@
-import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, footprintPaths, maskPolygons, maskSummary } from "./logic.js";
+import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, footprintPaths, maskPolygons, maskSummary, mapMarkers, pushTrail } from "./logic.js";
 
 const $ = (id) => document.getElementById(id);
-let history = [], cueLog = [], times = [], faces = [], placeInfo = {}, mapPano = null;
+let history = [], cueLog = [], times = [], faces = [], placeInfo = {}, mapPano = null, mapData = null, trail = [], lastResult = null;
 
 function render(r) {
+  lastResult = r;
   if (r.jpeg_b64) $("live-frame").src = "data:image/jpeg;base64," + r.jpeg_b64;
   const boxes = $("boxes"); boxes.replaceChildren();
   for (const d of r.detections ?? []) {
@@ -23,6 +24,7 @@ function render(r) {
     renderRefs(loc.best_ref);
   }
   renderMatch(r);
+  renderMinimap(r);
   const now = Date.now();
   cueLog = appendCue(cueLog, r.cue, now);
   $("cue-log").replaceChildren(...cueLog.map((c) => {
@@ -82,6 +84,23 @@ function renderMatch(r) {
   }
 }
 
+function renderMinimap(r) {
+  if (!mapData) return;
+  const active = r.location?.state === "LOCKED" ? r.location?.pano_id : null;
+  if (active) trail = pushTrail(trail, active, 8);
+  const { floor, name, markers } = mapMarkers(mapData, active, r.match?.ranking, trail, 400, 400);
+  const svg = $("minimap");
+  svg.replaceChildren(...markers.map((m) => {
+    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    c.setAttribute("class", `mm-dot mm-${m.kind}`);
+    c.setAttribute("cx", m.x); c.setAttribute("cy", m.y);
+    c.setAttribute("r", m.kind === "active" ? 12 : m.kind === "point" ? 5 : 8);
+    return c;
+  }));
+  $("mm-floor").textContent = floor == null ? "" : `Floor ${floor + 1}`;
+  $("mm-place").textContent = name;
+}
+
 function renderMasks(regions) {
   const layer = $("mask-layer");
   layer.replaceChildren();
@@ -136,5 +155,5 @@ setInterval(async () => {
   } catch {}
 }, 2000);
 
-fetch("/api/pano").then((r) => r.json()).then((p) => { faces = p.faces; placeInfo = p.places ?? {}; renderMasks(p.masked_regions); }).catch(() => {});
+fetch("/api/pano").then((r) => r.json()).then((p) => { faces = p.faces; placeInfo = p.places ?? {}; mapData = p.map ?? null; renderMasks(p.masked_regions); if (lastResult) { renderMatch(lastResult); renderMinimap(lastResult); } }).catch(() => {});
 connect();

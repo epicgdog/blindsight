@@ -103,8 +103,10 @@ def _capture_localizer(monkeypatch):
     seen = {}
 
     class FakeLocalizer:
-        def __init__(self, data_dir=None, pano_id=None, ref_detector=None, ref_detector_id=None):
-            seen.update(ref_detector=ref_detector, ref_detector_id=ref_detector_id)
+        def __init__(
+            self, data_dir=None, pano_id=None, ref_detector=None, ref_detector_id=None, places=None
+        ):
+            seen.update(ref_detector=ref_detector, ref_detector_id=ref_detector_id, places=places)
 
     monkeypatch.setattr(
         importlib, "import_module", lambda name: SimpleNamespace(Localizer=FakeLocalizer)
@@ -156,3 +158,47 @@ def test_api_pano_lists_masked_regions(settings):
 def test_api_pano_masked_regions_empty_without_support(settings):
     with TestClient(create_app(settings)) as client:
         assert client.get("/api/pano").json()["masked_regions"] == []
+
+
+# ---- candidate places and the minimap ----------------------------------------------------
+
+
+def test_candidate_places_default_to_all_and_are_configurable(monkeypatch):
+    import importlib
+
+    import server.config as config
+
+    monkeypatch.delenv("CANDIDATE_PLACES", raising=False)
+    assert importlib.reload(config).Settings().candidate_places == "all"
+    monkeypatch.setenv("CANDIDATE_PLACES", "12")
+    assert importlib.reload(config).Settings().candidate_places == "12"
+    monkeypatch.delenv("CANDIDATE_PLACES")
+    importlib.reload(config)
+
+
+def test_candidate_places_are_handed_to_the_localizer(settings, monkeypatch):
+    from dataclasses import replace
+
+    from server.server import make_localizer
+
+    seen = _capture_localizer(monkeypatch)
+    make_localizer(replace(settings, localizer="real", candidate_places="all"))
+    assert seen["places"] == "all"
+    make_localizer(replace(settings, localizer="real", candidate_places="1"))
+    assert seen["places"] is None  # one place = the old single-pano behaviour
+
+
+def test_api_pano_includes_the_minimap_data(settings):
+    import json
+
+    (settings.data_dir / "matterport").mkdir()
+    (settings.data_dir / "matterport" / "panoLocations.json").write_text(
+        json.dumps(
+            {"panoLocations": [{"id": "a", "label": "0", "position": {"x": 1, "y": 2, "z": 1.3}}]}
+        )
+    )
+    with TestClient(create_app(settings)) as client:
+        pano = client.get("/api/pano").json()
+    assert pano["map"]["points"][0]["id"] == "a"
+    assert pano["map"]["floors"][0]["count"] == 1
+    assert pano["map"]["bounds"]["min_x"] == 1
