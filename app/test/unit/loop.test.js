@@ -52,3 +52,16 @@ test("a capture or send error does not kill the loop", async () => {
   });
   assert.equal(sent, 2);
 });
+
+test("onFrame reports when each frame's capture started", async () => {
+  const frames = []; let running = true; let t = 100;
+  await runCaptureLoop({
+    isRunning: () => running, now: () => (t += 10),
+    capture: async () => ({ bytes: new Uint8Array([1]), w: 1, h: 1 }),
+    send: async () => { if (frames.length === 3) running = false; },
+    getHeading: () => 0,
+    onFrame: (f) => frames.push(f),
+  });
+  assert.deepEqual(frames.map((f) => f.seq), [1, 2, 3]);
+  assert.ok(frames.every((f) => Number.isFinite(f.captureStartMs)));
+});

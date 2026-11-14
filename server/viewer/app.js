@@ -1,4 +1,4 @@
-import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, footprintPaths, maskPolygons, maskSummary, mapMarkers, pushTrail } from "./logic.js";
+import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, footprintPaths, maskPolygons, maskSummary, mapMarkers, pushTrail, yawText, errorText } from "./logic.js";
 
 const $ = (id) => document.getElementById(id);
 let history = [], cueLog = [], times = [], faces = [], placeInfo = {}, mapPano = null, mapData = null, trail = [], lastResult = null;
@@ -18,7 +18,7 @@ function render(r) {
     const badge = $("state-badge"); badge.textContent = loc.state; badge.className = stateClass(loc.state);
     $("score").textContent = loc.score.toFixed(2);
     $("inliers").textContent = loc.inliers;
-    $("yaw").textContent = `${Math.round(loc.yaw_deg)}°`;
+    $("yaw").textContent = yawText(loc.yaw_deg);
     history = pushHistory(history, loc.score);
     $("spark-line").setAttribute("points", sparklinePoints(history, 200, 40));
     renderRefs(loc.best_ref);
@@ -132,19 +132,29 @@ function connect() {
 
 async function post(path) {
   const r = await fetch(path, { method: "POST" });
-  return r.json();
+  let body = null;
+  try { body = await r.json(); } catch {}
+  return { ok: r.ok, status: r.status, body };
 }
 
-$("btn-pos").onclick = () => post("/api/capture/pos");
-$("btn-neg").onclick = () => post("/api/capture/neg");
+const say = (msg) => { $("warmup-text").textContent = msg; };
+
+for (const [id, kind] of [["btn-pos", "pos"], ["btn-neg", "neg"]]) {
+  $(id).onclick = async () => {
+    const r = await post(`/api/capture/${kind}`);
+    say(r.ok ? `Saved ${kind === "pos" ? "positive" : "negative"} frame` : errorText(r.status, r.body));
+  };
+}
 $("btn-warmup").onclick = async () => {
-  const { seconds } = await post("/api/capture/auto?seconds=20");
+  const r = await post("/api/capture/auto?seconds=20");
+  if (!r.ok) { say(errorText(r.status, r.body)); return; }
+  const seconds = r.body?.seconds ?? 20;
   $("warmup-progress").max = seconds;
   const poll = setInterval(async () => {
     const s = await (await fetch("/api/capture/auto")).json();
     $("warmup-progress").value = s.elapsed;
-    $("warmup-text").textContent = `Warm-up ${s.elapsed.toFixed(0)}/${s.seconds} s, kept ${s.kept} frames`;
-    if (!s.running) { clearInterval(poll); $("warmup-text").textContent += " — done"; }
+    say(`Warm-up ${s.elapsed.toFixed(0)}/${s.seconds} s, kept ${s.kept} frames`);
+    if (!s.running) { clearInterval(poll); say(`Warm-up done, kept ${s.kept} frames`); }
   }, 500);
 };
 

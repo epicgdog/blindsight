@@ -67,3 +67,19 @@ test("seen ids are bounded so memory cannot grow forever", () => {
   for (let i = 0; i < 50; i++) { f.speaking = false; s.handle(cue("id" + i, "t")); }
   assert.ok(s.seenCount() <= 5);
 });
+
+test("speak receives the cue so callers can acknowledge it when speech starts", () => {
+  const seen = [];
+  const s = createCueSpeaker({ speak: (t, meta) => seen.push([t, meta]), stop() {}, isSpeaking: () => false });
+  const cue = { id: "c9", text: "table, ahead", priority: 1, interrupt: false };
+  s.handle(cue);
+  assert.deepEqual(seen[0], ["table, ahead", cue]);
+});
+
+test("the startup check is marked so it can be acknowledged separately", async () => {
+  const seen = [];
+  const s = createCueSpeaker({ speak: (t, meta) => seen.push([t, meta]), stop() {}, isSpeaking: () => false });
+  await s.startupCheck();
+  assert.equal(seen[0][0], "Blindsight ready");
+  assert.equal(seen[0][1].startup, true);
+});

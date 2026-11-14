@@ -15,6 +15,7 @@ import { normalizeServerUrl } from "./src/address";
 import { base64ToBytes } from "./src/base64";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { AUDIO_MODE, speechOptions } from "./src/audio";
+import { ackBody, createAckTracker, sendAck, speechAckUrl } from "./src/ack";
 import { PICTURE_OPTIONS, PICTURE_SIZE, SAVE_OPTIONS, resizePlan } from "./src/camera";
 
 const KEY = "blindsight.server";
@@ -33,6 +34,8 @@ export default function App() {
   const speaking = useRef(false);
   const frames = useRef([]);
   const sizeLogged = useRef(false);
+  const ackUrl = useRef(null);
+  const ackTracker = useRef(createAckTracker());
 
   useEffect(() => {
     (async () => {
@@ -52,7 +55,18 @@ export default function App() {
   const speaker = useRef(
     createCueSpeaker(
       {
-        speak: (t) => { Speech.speak(t, speechOptions({ onStart: () => (speaking.current = true), onSettled: () => (speaking.current = false) })); speaking.current = true; },
+        speak: (t, meta) => {
+          Speech.speak(t, speechOptions({
+            onStart: () => {
+              speaking.current = true;
+              // Tell the server speech actually started, so it can measure capture-to-audible latency.
+              if (meta?.startup) sendAck(fetch, ackUrl.current, ackBody(null, null));
+              else if (meta?.id) sendAck(fetch, ackUrl.current, ackBody(meta.id, ackTracker.current.captureToAudibleMs(meta.id, Date.now())));
+            },
+            onSettled: () => (speaking.current = false),
+          }));
+          speaking.current = true;
+        },
         stop: () => { Speech.stop(); speaking.current = false; },
         isSpeaking: () => speaking.current,
       },
@@ -68,7 +82,11 @@ export default function App() {
     await activateKeepAwakeAsync();
     await setAudioModeAsync(AUDIO_MODE).catch((e) => console.log("audio mode", e?.message));
     await speaker.startupCheck();
-    client.current = createClient({ url, speaker, onStatus: setStatus });
+    ackUrl.current = speechAckUrl(url);
+    client.current = createClient({
+      url, speaker, onStatus: setStatus,
+      onResult: (r) => { if (r.cue) ackTracker.current.noteCue(r.cue.id, r.seq); },
+    });
     client.current.start();
     runningRef.current = true; setRunning(true);
     runCaptureLoop({
@@ -93,6 +111,7 @@ export default function App() {
         if (f.length > 1) setFps(((f.length - 1) * 1000) / (f[f.length - 1] - f[0]));
       },
       getHeading: () => heading.current,
+      onFrame: ({ seq, captureStartMs }) => ackTracker.current.noteFrame(seq, captureStartMs),
       onTiming: (t) => { if (t.slow) console.log(`slow capture ${t.captureMs} ms: lower quality/size`); },
     });
   }, [address, perm, askPerm, speaker]);

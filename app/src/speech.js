@@ -14,14 +14,14 @@ export function createCueSpeaker({ speak, stop, isSpeaking }, { log = () => {}, 
         return; // stale by the time it is free: drop, do not queue (and do not mark seen)
       }
       remember(cue.id);
-      speak(cue.text);
+      speak(cue.text, cue);
     },
     announce(text) {
       stop();
       speak(text);
     },
     async startupCheck() {
-      speak("Blindsight ready");
+      speak("Blindsight ready", { startup: true });
       log("speech played: Blindsight ready (volume check)");
     },
     seenCount: () => seen.size,
