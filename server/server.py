@@ -93,6 +93,15 @@ def make_detector(settings: Settings):
     return Detector(settings)
 
 
+def _accepts_attitude(localizer) -> bool:
+    """True when the localizer's update() takes the phone's pitch and roll."""
+    try:
+        params = inspect.signature(localizer.update).parameters
+    except (TypeError, ValueError):
+        return False
+    return "pitch_deg" in params and "roll_deg" in params
+
+
 def make_localizer(settings: Settings, detector=None):
     module = "server.localize_stub" if settings.localizer == "stub" else "server.localize"
     if settings.localizer == "real" and settings.localization_scope == "property":
@@ -189,7 +198,13 @@ class Pipeline:
         detected = time.monotonic()
         # Part 3 owns scheduling embeddings and temporal fusion internally. Calling every
         # processed frame preserves heading prediction, failure counts and warm-up evidence.
-        self.location = self.localizer.update(rgb, detections, packet.header.heading_deg)
+        hdr = packet.header
+        if _accepts_attitude(self.localizer):
+            self.location = self.localizer.update(
+                rgb, detections, hdr.heading_deg, pitch_deg=hdr.pitch_deg, roll_deg=hdr.roll_deg
+            )
+        else:
+            self.location = self.localizer.update(rgb, detections, hdr.heading_deg)
         localized = time.monotonic()
         cue = self.cues.update(detections, self.location, localized)
         if warmup and localized < warmup.deadline:

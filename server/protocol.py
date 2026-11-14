@@ -68,6 +68,9 @@ class FrameHeader:
     heading_deg: float | None
     w: int
     h: int
+    # Optional camera attitude from the phone's accelerometer (degrees). pitch: + looks up.
+    pitch_deg: float | None = None
+    roll_deg: float | None = None
 
     def __post_init__(self):
         if type(self.seq) is not int or not 0 <= self.seq <= 2**53 - 1:
@@ -82,6 +85,14 @@ class FrameHeader:
             raise ProtocolError("heading_deg must be null or in [0, 360)")
         if any(type(v) is not int or not 1 <= v <= 8192 for v in (self.w, self.h)):
             raise ProtocolError("w and h must be integers in [1, 8192]")
+        for name, value, limit in (
+            ("pitch_deg", self.pitch_deg, 90),
+            ("roll_deg", self.roll_deg, 180),
+        ):
+            if value is not None and (
+                type(value) not in (int, float) or not math.isfinite(value) or abs(value) > limit
+            ):
+                raise ProtocolError(f"{name} must be null or within +/-{limit}")
 
 
 @dataclass(frozen=True)
@@ -108,7 +119,9 @@ def decode_frame(data: bytes, max_bytes: int = MAX_MESSAGE_BYTES) -> FramePacket
         if not isinstance(value, dict):
             raise ProtocolError("Frame header must be an object")
         header = FrameHeader(
-            **{key: value[key] for key in ("seq", "ts_ms", "heading_deg", "w", "h")}
+            **{key: value[key] for key in ("seq", "ts_ms", "heading_deg", "w", "h")},
+            pitch_deg=value.get("pitch_deg"),
+            roll_deg=value.get("roll_deg"),
         )
     except (ValueError, TypeError, KeyError, UnicodeDecodeError, RecursionError) as exc:
         raise ProtocolError("Invalid frame header") from exc

@@ -119,6 +119,9 @@ MAX_COMPETITORS = int(os.environ.get("P3_MAX_COMPETITORS", "20"))
 # this inlier ratio, and be seen on this many consecutive frames, before the reported place moves.
 MULTI_MARGIN = float(os.environ.get("P3_MULTI_MARGIN", "1.15"))
 SWITCH_FRAMES = int(os.environ.get("P3_SWITCH_FRAMES", "2"))
+# IMU gate: a verified match whose pitch disagrees with the phone accelerometer by more than this
+# many degrees is not trusted (gravity gives pitch to a few degrees; vision can lock onto look-alikes).
+PITCH_GATE_DEG = float(os.environ.get("P3_PITCH_GATE_DEG", "15"))
 MAX_ONSITE_NEG = 200  # frames from Part 1's POST /api/capture/neg used as competing views
 ONSITE_NEG = "onsite_negatives"  # place name for those frames
 COMP_YAWS = tuple(range(0, 360, 15))  # competitor views: every 15 degrees at pitch 0
@@ -971,7 +974,7 @@ class Localizer:
         )
 
     # -- contract ----------------------------------------------------------------
-    def update(self, frame_rgb, detections, heading_deg) -> Location:
+    def update(self, frame_rgb, detections, heading_deg, pitch_deg=None, roll_deg=None) -> Location:
         with self._lock:
             t0 = time.perf_counter()
             self._n += 1
@@ -986,6 +989,10 @@ class Localizer:
             if embed_now:
                 self._sims = fe.sims
             matched, best = fe.decide(self.s, self.mode, MULTI_MARGIN if self.multi else None)
+            imu_rejected = False
+            if matched and best is not None and pitch_deg is not None and best.pitch is not None:
+                if abs(float(best.pitch) - float(pitch_deg)) > PITCH_GATE_DEG:
+                    matched, imu_rejected = False, True
             if self.multi:
                 matched, best = self._hold_place(matched, best)
             yaw = None
@@ -1017,6 +1024,8 @@ class Localizer:
             )
             self.last_debug = {
                 "match": self._match_view(fe, best, ref, st.yaw, frame_rgb.shape),
+                "imu_rejected": imu_rejected,
+                "imu_pitch": pitch_deg, "imu_roll": roll_deg,
                 "matched": matched, "embed": round(fe.embed_ms, 1), "extract": round(fe.extract_ms, 1),
                 "verify": round(fe.verify_ms, 1), "total": round((time.perf_counter() - t0) * 1000, 1),
                 "candidates": [(c.name, c.place, c.inliers, c.grid) for c in fe.cands],
