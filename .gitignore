@@ -18,3 +18,12 @@ node_modules/
 .expo/
 dist/
 slides/backup.mp4
+# Secrets: never commit credentials (Matterport keys live in .env.local)
+!.env.example
+
+# Local demo sessions and regenerated Part 3 artifacts
+data/synthetic/
+data/eval/cache/
+
+# Python / tooling
+*.pyc
