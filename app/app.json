@@ -5,7 +5,10 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
-    "ios": { "supportsTablet": false, "infoPlist": {
+    "ios": { "bundleIdentifier": "org.blindsight.navigation", "supportsTablet": false, "infoPlist": {
+      "NSMotionUsageDescription": "Blindsight counts your steps to calibrate walking distance.",
+      "NSMicrophoneUsageDescription": "Ask Blindsight navigation questions by voice.",
+      "NSSpeechRecognitionUsageDescription": "Understand your spoken navigation requests.",
       "NSCameraUsageDescription": "Blindsight streams the camera to your laptop to detect objects and locate you.",
       "NSLocationWhenInUseUsageDescription": "Blindsight reads the compass heading."
     } },

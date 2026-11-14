@@ -41,6 +41,7 @@ from server.detect import Detector, StubDetector
 from server.navigation import navigation_router
 from server.protocol import FramePacket, ProtocolError, decode_frame
 from server.record import SessionRecorder
+from server.spatial import spatial_router
 
 log = logging.getLogger("blindsight")
 
@@ -405,6 +406,7 @@ def create_app(
 
     app = FastAPI(title="Blindsight", lifespan=lifespan)
     app.include_router(navigation_router(settings.data_dir))
+    app.include_router(spatial_router(settings.data_dir))
 
     @app.get("/")
     async def index():

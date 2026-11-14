@@ -12,11 +12,12 @@ import { runCaptureLoop } from "./src/loop";
 import { encodeFrame } from "./src/protocol";
 import { normalizeServerUrl } from "./src/address";
 import { base64ToBytes } from "./src/base64";
+import NativeNavigation, { trackingModule } from "./NativeNavigation";
 
 const KEY = "blindsight.server";
 const DEFAULT = process.env.EXPO_PUBLIC_SERVER_URL ?? "";
 
-export default function App() {
+function LegacyApp() {
   const [perm, askPerm] = useCameraPermissions();
   const [address, setAddress] = useState(DEFAULT);
   const [running, setRunning] = useState(false);
@@ -99,6 +100,10 @@ export default function App() {
       <CameraView ref={camera} style={s.preview} facing="back" />
     </View>
   );
+}
+
+export default function App() {
+  return trackingModule ? <NativeNavigation /> : <LegacyApp />;
 }
 
 const s = StyleSheet.create({
