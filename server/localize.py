@@ -51,6 +51,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from localization_debug import localization_reason  # noqa: E402
 from matchviz import footprint_polygon, rank_places  # noqa: E402
+from refmask import compute_masks, mask_key, region_polygons  # noqa: E402
 from geometry import (  # noqa: E402
     Features,
     ang_diff,
@@ -560,6 +561,7 @@ class _Ref:
     demo: bool
     feats: Features
     K: np.ndarray
+    masks: list = field(default_factory=list)  # movable-object boxes (px) masked out of this view
 
 
 # ---------------------------------------------------------------- the Localizer
@@ -568,13 +570,18 @@ class Localizer:
 
     def __init__(self, data_dir: str | Path | None = None, settings: Settings | None = None,
                  matcher=None, embedder=None, competitors="auto", mode: str = "geometry",
-                 pano_id: str | None = None, ref_size: tuple[int, int] = REF_SIZE, verbose: bool = True):
+                 pano_id: str | None = None, ref_size: tuple[int, int] = REF_SIZE, verbose: bool = True,
+                 ref_detector=None, ref_detector_id: str = "detector"):
         t0 = time.perf_counter()
         self.data_dir = Path(data_dir) if data_dir else DATA_DIR
         self.s = settings or Settings.load(self.data_dir / "calibration.json")
         self.mode = mode
         self.ref_size = tuple(ref_size)
         self.verbose = verbose
+        # Optional detector (image -> detections) used to mask people and furniture out of the
+        # pano reference views, the same way the live frame is masked.
+        self.ref_detector = ref_detector
+        self.ref_detector_id = ref_detector_id
         self.notes: list[str] = []
         meta = load_pano_meta(self.data_dir)
         self.pano_id = pano_id or meta["pano_id"]
@@ -644,10 +651,11 @@ class Localizer:
                 views = build_refs(sampler, self.s.HFOV_DEG, self.ref_size)
             else:
                 views = build_refs(sampler, self.s.HFOV_DEG, self.ref_size, yaws=COMP_YAWS, pitches=(0,))
-        feats = self._cached_features(pdir, views)
+        masks = self._masks_for(pdir, views)
+        feats = self._cached_features(pdir, views, masks)
         for v, f in zip(views, feats):
             w, h = v.image.shape[1], v.image.shape[0]
-            self._refs.append(_Ref(v, place, demo, f, intrinsics(w, h, v.hfov)))
+            self._refs.append(_Ref(v, place, demo, f, intrinsics(w, h, v.hfov), list(masks.get(v.name, ()))))
 
     def _load_onsite_negatives(self) -> None:
         """Frames captured away from the scan point (Part 1: POST /api/capture/neg ->
@@ -671,10 +679,22 @@ class Localizer:
             self.competitors.append(ONSITE_NEG)
             self.notes.append(f"{len(files)} on-site negative frames used as competing views")
 
-    def _cached_features(self, pdir: Path, views: list[RefView]) -> list[Features]:
+    def _masks_for(self, pdir: Path, views: list[RefView]) -> dict:
+        if self.ref_detector is None:
+            return {}
+        masks = compute_masks(pdir / "cache", views, self.ref_detector, mask_key(self.ref_detector_id, 0))
+        n = sum(len(b) for b in masks.values())
+        self.notes.append(f"{pdir.name}: masked {n} movable objects in {len(views)} reference views")
+        return masks
+
+    def _cached_features(self, pdir: Path, views: list[RefView], masks: dict | None = None) -> list[Features]:
         """Reference keypoints, cached per place/matcher/size (LightGlue on CPU is slow)."""
         w, h = self.ref_size
-        key = f"feats_{self.matcher.name.replace('+', '_')}_{w}x{h}_{self.s.HFOV_DEG:g}.npz"
+        masks = masks or {}
+        tag = ""
+        if any(masks.values()):  # masked features must not share a cache with unmasked ones
+            tag = "_m" + mask_key(json.dumps({k: masks[k] for k in sorted(masks)}), 0)
+        key = f"feats_{self.matcher.name.replace('+', '_')}_{w}x{h}_{self.s.HFOV_DEG:g}{tag}.npz"
         cache = pdir / "cache" / key
         names = [v.name for v in views]
         if cache.exists():
@@ -690,7 +710,7 @@ class Localizer:
                     return out
             except Exception:  # noqa: BLE001 - a bad cache is just recomputed
                 pass
-        out = [extract_features(self.matcher, normalize_contrast(v.image)) for v in views]
+        out = [extract_features(self.matcher, normalize_contrast(v.image), masks.get(v.name) or ()) for v in views]
         try:
             arrs = {"names": np.array(names)}
             for i, f in enumerate(out):
@@ -704,7 +724,19 @@ class Localizer:
         return out
 
     def _embed_refs(self, refs: list[_Ref]) -> np.ndarray:
-        return self.embedder.embed_batch([normalize_contrast(r.view.image) for r in refs])
+        imgs = []
+        for r in refs:
+            img = normalize_contrast(r.view.image)
+            imgs.append(blank_boxes(img, r.masks) if r.masks else img)
+        return self.embedder.embed_batch(imgs)
+
+    def masked_regions(self) -> list:
+        """Masked people/furniture on the demo pano as equirect polygons (for the viewer)."""
+        demo = [r for r in self._refs if r.demo and r.view.source == "pano" and r.masks]
+        if not demo:
+            return []
+        h, w = demo[0].view.image.shape[:2]
+        return region_polygons([r.view for r in demo], {r.view.name: r.masks for r in demo}, (w, h))
 
     # -- helpers ---------------------------------------------------------------
     def _prep(self, frame_rgb) -> np.ndarray:

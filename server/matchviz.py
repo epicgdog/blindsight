@@ -32,22 +32,27 @@ def rank_places(
     ]
 
 
-def footprint_polygon(
+def view_rect_polygon(
     yaw: float,
     pitch: float,
     roll: float,
     hfov: float,
     aspect: float,
+    rect: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0),
     samples: int = 6,
 ) -> list[list[float]]:
-    """Outline of the camera's view on an equirectangular pano, normalised to 0..1.
+    """Outline of a rectangle of a camera image on an equirectangular pano, normalised to 0..1.
 
-    x = longitude (yaw) / 360, y = 0.5 - latitude / 180. aspect is frame height / width.
-    x is unwrapped around the view centre (it may be < 0 or > 1); draw copies at +/-1.
+    rect is (u1, v1, u2, v2) in 0..1 image coordinates (0,0 = top-left). x = longitude / 360,
+    y = 0.5 - latitude / 180. aspect is image height / width. x is unwrapped around the view
+    centre (it may be < 0 or > 1); draw copies at +/-1.
     """
     a = math.tan(math.radians(hfov) / 2)
     b = a * aspect
-    corners = [(-a, -b), (a, -b), (a, b), (-a, b)]
+    u1, v1, u2, v2 = rect
+    xa, xb = (2 * u1 - 1) * a, (2 * u2 - 1) * a
+    ya, yb = (2 * v1 - 1) * b, (2 * v2 - 1) * b
+    corners = [(xa, ya), (xb, ya), (xb, yb), (xa, yb)]
     c2w = cam_to_world(yaw, pitch, roll)
     yaw_r = math.radians(yaw)
     points: list[list[float]] = []
@@ -62,3 +67,15 @@ def footprint_polygon(
             dlon = (lon - yaw_r + math.pi) % (2 * math.pi) - math.pi
             points.append([round((yaw_r + dlon) / (2 * math.pi), 5), round(0.5 - lat / math.pi, 5)])
     return points
+
+
+def footprint_polygon(
+    yaw: float,
+    pitch: float,
+    roll: float,
+    hfov: float,
+    aspect: float,
+    samples: int = 6,
+) -> list[list[float]]:
+    """Outline of the whole camera view on the pano (see view_rect_polygon)."""
+    return view_rect_polygon(yaw, pitch, roll, hfov, aspect, (0.0, 0.0, 1.0, 1.0), samples)

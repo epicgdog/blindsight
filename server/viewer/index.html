@@ -48,8 +48,10 @@
       <h2>Where on the pano</h2>
       <div id="pano-map">
         <img id="equirect" alt="pano panorama">
+        <svg id="mask-layer" viewBox="0 0 2048 1024" preserveAspectRatio="none" aria-label="regions of the pano that are ignored"></svg>
         <svg id="footprint" viewBox="0 0 2048 1024" preserveAspectRatio="none" aria-label="where the frame sits on the pano"></svg>
       </div>
+      <div id="mask-note"></div>
     </section>
     <section class="panel" id="capture-panel">
       <button id="btn-pos">Save as positive</button>

@@ -177,3 +177,53 @@ def test_match_view_ranks_places_and_outlines_the_frame_on_the_pano(loc, room):
         cx = sum(p[0] for p in poly) / len(poly)
         # the box is centred near the matched yaw (x = yaw / 360, unwrapped)
         assert abs(((cx * 360 - out.yaw_deg + 180) % 360) - 180) < 8
+
+
+def _fake_ref_detector(image):
+    """A 'person' over the centre third of every reference view."""
+    from types import SimpleNamespace
+
+    return [SimpleNamespace(cls="person", conf=0.9, bbox=(0.33, 0.33, 0.67, 0.67))]
+
+
+@pytest.fixture(scope="module")
+def masked_loc(data):
+    return Localizer(
+        data, settings=settings(), matcher=SiftMatcher(), embedder=ClassicEmbedder(),
+        verbose=False, ref_detector=_fake_ref_detector, ref_detector_id="fake@0.35",
+    )
+
+
+def test_reference_views_are_masked_before_matching(masked_loc):
+    demo = [r for r in masked_loc._refs if r.demo and r.view.source == "pano"]
+    assert demo and all(r.masks for r in demo)
+    r = demo[0]
+    x1, y1, x2, y2 = r.masks[0]
+    kp = r.feats.kpts
+    inside = (kp[:, 0] >= x1) & (kp[:, 0] <= x2) & (kp[:, 1] >= y1) & (kp[:, 1] <= y2)
+    assert not inside.any(), "no keypoints may sit on a masked person"
+
+
+def test_masking_changes_the_reference_embeddings(loc, masked_loc):
+    assert loc._emb.shape == masked_loc._emb.shape
+    assert not np.allclose(loc._emb, masked_loc._emb)
+
+
+def test_unmasked_localizer_is_unchanged(loc):
+    assert all(r.masks == [] for r in loc._refs)
+    assert loc.masked_regions() == []
+
+
+def test_masked_regions_outline_the_ignored_areas_on_the_pano(masked_loc):
+    polys = masked_loc.masked_regions()
+    assert polys and all(len(p) >= 4 and all(len(pt) == 2 for pt in p) for p in polys)
+
+
+def test_masked_localizer_still_locks_at_the_scan_point(masked_loc, room):
+    masked_loc.reset()
+    states = []
+    for i in range(6):
+        gt = 200 + 6 * i
+        out = masked_loc.update(frame(room, "room_p0", gt), [], (gt + 77.0) % 360)
+        states.append(out.state)
+    assert LOCKED in states

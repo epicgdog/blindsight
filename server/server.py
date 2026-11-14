@@ -92,7 +92,7 @@ def make_detector(settings: Settings):
     return Detector(settings)
 
 
-def make_localizer(settings: Settings):
+def make_localizer(settings: Settings, detector=None):
     module = "server.localize_stub" if settings.localizer == "stub" else "server.localize"
     if settings.localizer == "real" and settings.localization_scope == "property":
         module = "server.property_localize"
@@ -102,6 +102,15 @@ def make_localizer(settings: Settings):
         kwargs = {"data_dir": settings.data_dir} if "data_dir" in parameters else {}
         if settings.pano_id and "pano_id" in parameters:
             kwargs["pano_id"] = settings.pano_id
+        if (
+            settings.mask_refs
+            and detector is not None
+            and not isinstance(detector, StubDetector)
+            and "ref_detector" in parameters
+        ):
+            # Mask people and furniture out of the pano reference views with the live detector.
+            kwargs["ref_detector"] = detector.detect
+            kwargs["ref_detector_id"] = f"{settings.yolo_model}@{settings.yolo_conf}"
         return factory(**kwargs)
     except ModuleNotFoundError as exc:
         raise RuntimeError(
@@ -431,7 +440,7 @@ def create_app(
                 actual_detector = await asyncio.get_running_loop().run_in_executor(
                     executor, factory
                 )
-            factory = localizer_factory or (lambda: make_localizer(settings))
+            factory = localizer_factory or (lambda: make_localizer(settings, actual_detector))
             # Fail at startup, not on the first phone frame, if the selected plugin cannot load.
             initial_localizer = await asyncio.get_running_loop().run_in_executor(executor, factory)
             runtime = Runtime(
@@ -482,6 +491,8 @@ def create_app(
             result["localization_scope"] = info.get("scope", "single")
             result["indexed_scans"] = info.get("indexed_scans", 1)
             result["indexed_scan_ids"] = info.get("scan_ids", [])
+        regions = getattr(localizer, "masked_regions", None)
+        result["masked_regions"] = regions() if callable(regions) else []
         return result
 
     @app.get("/metrics")

@@ -55,3 +55,25 @@ test("footprintPaths returns nothing without a polygon", () => {
   assert.deepEqual(footprintPaths(null, 100, 50), []);
   assert.deepEqual(footprintPaths([], 100, 50), []);
 });
+
+import { maskPolygons, maskSummary } from "../logic.js";
+
+test("maskPolygons keeps in-bounds regions once and repeats seam-crossing ones", () => {
+  const inside = [[0.2, 0.4], [0.3, 0.4], [0.3, 0.6], [0.2, 0.6]];
+  const crossing = [[-0.05, 0.4], [0.05, 0.4], [0.05, 0.6], [-0.05, 0.6]];
+  assert.equal(maskPolygons([inside], 2048, 1024).length, 1);
+  const both = maskPolygons([crossing], 2048, 1024);
+  assert.equal(both.length, 2); // the region and its wrapped copy at the far edge
+  assert.ok(both.some((p) => p.startsWith("1945.6,")));
+});
+
+test("maskPolygons tolerates empty input", () => {
+  assert.deepEqual(maskPolygons(null, 100, 50), []);
+  assert.deepEqual(maskPolygons([], 100, 50), []);
+});
+
+test("maskSummary words the legend", () => {
+  assert.equal(maskSummary(0), "");
+  assert.equal(maskSummary(1), "1 region ignored (people, furniture)");
+  assert.equal(maskSummary(42), "42 regions ignored (people, furniture)");
+});

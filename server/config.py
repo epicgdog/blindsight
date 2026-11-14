@@ -31,6 +31,7 @@ MATTERPORT_MODEL_ID = os.getenv("MATTERPORT_MODEL_ID", "P3S6VUTP3qB")
 DEFAULT_PANO_ID = "1k478kza39tbfu1uhbttg5ybb"
 DEFAULT_PANO_LABEL = "Rabinowitz Hall"
 LOCALIZER = os.getenv("LOCALIZER", "stub")
+MASK_REFS = env_bool("MASK_REFS", True)  # mask people/furniture out of the pano reference views
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ class Settings:
     record: bool = RECORD
     localizer: str = LOCALIZER
     localization_scope: str = os.getenv("LOCALIZATION_SCOPE", "property")
+    mask_refs: bool = MASK_REFS
     detector: str = os.getenv("DETECTOR", "yolo")
     yolo_device: str = os.getenv("YOLO_DEVICE", "auto")
     yolo_model: str = os.getenv("YOLO_MODEL", "yolo11n.pt")
