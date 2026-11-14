@@ -1012,6 +1012,15 @@ class Localizer:
             if embed_now:
                 self._sims = fe.sims
             matched, best = fe.decide(self.s, self.mode, MULTI_MARGIN if self.multi else None)
+            distinctive = None
+            if self.multi and matched and best is not None:
+                from server.disambiguation import distinctive_support
+                prepared = self._prep(frame_rgb)
+                distinctive = distinctive_support(best, fe.cands,
+                    {i: v.live_pts for i, v in fe.verifs.items()},
+                    (prepared.shape[1], prepared.shape[0]), self.s.N_MIN)
+                if not distinctive["passed"]:
+                    matched = False
             imu_rejected = False
             if matched and best is not None and pitch_deg is not None and best.pitch is not None:
                 if abs(float(best.pitch) - float(pitch_deg)) > PITCH_GATE_DEG:
@@ -1060,6 +1069,7 @@ class Localizer:
                 "match": self._match_view(fe, best, ref, st.yaw, frame_rgb.shape, position),
                 "position": fix.to_dict() if fix is not None else None,
                 "moving": moving, "jump_rejected": jump_rejected,
+                "distinctive_evidence": distinctive,
                 "track": {"accepted": track.accepted, "rejected": track.rejected, "reinit": track.reinit,
                           "d2": None if track.d2 is None else round(track.d2, 2)},
                 "imu_rejected": imu_rejected,
