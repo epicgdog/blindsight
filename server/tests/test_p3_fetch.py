@@ -78,3 +78,60 @@ def test_missing_credentials_stop_the_script(sandbox):
     with pytest.raises(SystemExit) as e:
         fm.main([])
     assert e.value.code == fm.EXIT_NO_CREDENTIALS
+
+
+def square(fid: str, name: str, x0: float, y0: float, x1: float, y1: float, conf: float = 0.9):
+    """One room as the Rooms query returns it: wall vertices, wall edges (shuffled), boundary."""
+    v = [(f"{name}{i}", x, y) for i, (x, y) in enumerate([(x0, y0), (x1, y0), (x1, y1), (x0, y1)])]
+    e = [(f"e{name}{i}", v[i][0], v[(i + 1) % 4][0]) for i in range(4)]
+    e = [e[2], e[0], e[3], e[1]]  # boundary edges in no particular order
+    verts = [{"id": i, "position": {"x": x, "y": y}} for i, x, y in v]
+    edges = [{"id": i, "vertices": [{"id": a}, {"id": b}]} for i, a, b in e]
+    room = {"id": f"r{name}", "floor": {"id": fid}, "classifications": [{"label": name, "confidence": conf}],
+            "boundary": {"edges": [{"id": i} for i, _, _ in e]}}
+    return verts, edges, room
+
+
+def fake_rooms() -> dict:
+    parts = [square("f1", "Lobby", -4.0, 0.0, -2.0, 2.0), square("f1", "Office", 1.5, -1.0, 4.0, 2.0),
+             square("f1", "Void", -1.0, -1.0, 1.0, 1.0)]
+    floor = {"id": "f1", "label": "Floor 1", "vertices": [x for p in parts for x in p[0]],
+             "edges": [x for p in parts for x in p[1]]}
+    return {"data": {"model": {"floors": [floor], "rooms": [p[2] for p in parts]}}}
+
+
+def room_panos():
+    return [{"id": pid, "label": str(n), "pos": [*POSITIONS[pid], 1.5]}
+            for n, pid in enumerate(["room_p0", "room_p1", "room_p2", "room_p3"])]
+
+
+def test_scan_points_get_room_names_and_lobby_ranks_first():
+    panos = room_panos()
+    fm.assign_rooms(panos, fm.room_polygons(fake_rooms()))
+    rooms = {p["id"]: p["room"] for p in panos}
+    # p2 (-3, 1) is in the Lobby, p1 (2.5, 0.5) in the Office; "Void" rooms are ignored
+    assert rooms == {"room_p0": None, "room_p1": "Office", "room_p2": "Lobby", "room_p3": None}
+    assert fm.rank(panos)[0]["id"] == "room_p2"  # a lobby beats a more central scan point
+    lobby = next(p for p in panos if p["id"] == "room_p2")
+    assert fm.spoken_label(lobby, None) == "the lobby"
+    assert fm.spoken_label(lobby, "Rabinowitz Hall") == "Rabinowitz Hall"
+    assert fm.spoken_label({"label": "3", "room": "Lobby / Office"}, None) is None  # ambiguous: two floors
+
+
+def test_list_prints_rooms_and_downloads_nothing(sandbox, monkeypatch, capsys):
+    ids = ["room_p0", "room_p1", "room_p2", "room_p3"]
+    monkeypatch.setenv("MATTERPORT_API_KEY", "dummy")
+    monkeypatch.setenv("MATTERPORT_API_TOKEN", "dummy")
+    cfg = json.loads((ROOT / "data" / "matterport" / "api.json").read_text())
+
+    def fake_graphql(_cfg, headers, query, variables):
+        assert headers["Authorization"].startswith("Basic ") and variables == {"id": "XYZ"}
+        if query == cfg["rooms_query"]:
+            return fake_rooms()
+        return fake_response(sandbox, ids)
+
+    monkeypatch.setattr(fm, "graphql", fake_graphql)
+    assert fm.main(["--list", "--model", "XYZ"]) == 0
+    out = capsys.readouterr().out
+    assert "Lobby" in out and "Office" in out and "room_p3" in out
+    assert not (sandbox / "data" / "pano").exists()

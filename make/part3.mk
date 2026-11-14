@@ -12,7 +12,7 @@ P3_ML_DEPS := --with torch --with transformers --with "lightglue @ git+https://g
 P3_PY      ?= $(if $(wildcard server/pyproject.toml),uv run --project server python,uv run --no-project $(P3_DEPS) python)
 P3_PY_ML   ?= $(if $(wildcard server/pyproject.toml),uv run --project server python,uv run --no-project $(P3_DEPS) $(P3_ML_DEPS) python)
 
-.PHONY: p3-help p3-access p3-fetch p3-refs p3-synth p3-calibrate p3-eval p3-feed p3-video \
+.PHONY: p3-help p3-access p3-list p3-fetch p3-refs p3-synth p3-calibrate p3-eval p3-feed p3-video \
         p3-weights p3-test p3-selfcheck p3-all p3-check
 
 p3-help: ## list the Part 3 targets
@@ -21,8 +21,11 @@ p3-help: ## list the Part 3 targets
 p3-access: ## check the Matterport key works and can see the demo model (MODEL=... to try another)
 	$(P3_PY) scripts/fetch_matterport.py --check $(if $(MODEL),--model $(MODEL))
 
-p3-fetch: ## Phase 3: pick the pano, download 2k faces for it and its neighbours (LABEL="the main lobby")
-	$(P3_PY) scripts/fetch_matterport.py $(if $(MODEL),--model $(MODEL)) $(if $(LABEL),--label "$(LABEL)")
+p3-list: ## list every scan point with its room name and height (MODEL=...); downloads nothing
+	$(P3_PY) scripts/fetch_matterport.py --list $(if $(MODEL),--model $(MODEL))
+
+p3-fetch: ## pick the pano (or PANO=<id>), download 2k faces for it and its neighbours (LABEL="...")
+	$(P3_PY) scripts/fetch_matterport.py $(if $(MODEL),--model $(MODEL)) $(if $(PANO),--pano-id $(PANO)) $(if $(LABEL),--label "$(LABEL)")
 
 p3-refs: ## verify face layouts, write contact sheets, build the 72 reference views
 	$(P3_PY) server/refs.py --all

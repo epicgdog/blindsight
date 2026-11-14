@@ -19,6 +19,7 @@ What the script does:
     and contact sheets for the human to recognise the spot (A3)
 
   python scripts/fetch_matterport.py --check          # key works? can it see the model?
+  python scripts/fetch_matterport.py --list           # every scan point with its room and height
   python scripts/fetch_matterport.py --label "the main lobby"
   python scripts/fetch_matterport.py --pano-id <ID>   # override the pick
   python scripts/fetch_matterport.py --model zvKHR9DHNjJ   # another model (e.g. the quickstart's house)
@@ -55,7 +56,7 @@ MP_DIR = DATA / "matterport"
 PANO_DIR = DATA / "pano"
 API_CFG = MP_DIR / "api.json"
 ENV_FILE = ROOT / ".env.local"
-LABEL_RE = re.compile(r"lobby|entr|foyer|reception|main|atrium", re.I)
+LABEL_RE = re.compile(r"lobby|entr|foyer|reception|atrium|vestibule", re.I)
 EXIT_NO_CREDENTIALS = 3
 EXIT_NO_API_CONFIG = 2
 
@@ -233,27 +234,32 @@ def rank(panos: list[dict], kp: dict[str, int] | None = None) -> list[dict]:
     kmax = max((kp or {}).values(), default=0) or 1
     out = []
     for p, dd in zip(panos, dn):
-        lab = 1.0 if LABEL_RE.search(p["label"] or "") else 0.0
+        lab = 1.0 if LABEL_RE.search(f"{p['label'] or ''} {p.get('room') or ''}") else 0.0
         kps = (kp or {}).get(p["id"], 0) / kmax
         out.append({**p, "score": round(2 * lab + (1 - dd) + kps, 4), "label_hit": bool(lab),
-                    "centrality": round(1 - dd, 3), "horizon_kp": (kp or {}).get(p["id"])})
+                    "centrality": round(1 - dd, 3), "horizon_kp": (kp or {}).get(p["id"]), "room": p.get("room")})
     return sorted(out, key=lambda r: -r["score"])
 
 
 def topdown_plot(panos: list[dict], chosen: str, neighbors: set[str], path: Path) -> None:
-    xy, _ = horizontal(np.array([p["pos"] for p in panos]))
+    P = np.array([p["pos"] for p in panos])
+    xy, v = horizontal(P)
+    cz = P[[p["id"] for p in panos].index(chosen), v]
     lo, hi = xy.min(0), xy.max(0)
     span = max(float((hi - lo).max()), 1e-6)
     S, m = 900, 60
     img = np.full((S, S, 3), 255, np.uint8)
     pts = ((xy - lo) / span * (S - 2 * m) + m).astype(int)
     pts[:, 1] = S - pts[:, 1]
-    for p, (x, y) in zip(panos, pts):
+    for p, (x, y), z in zip(panos, pts, P[:, v]):
         col = (0, 0, 220) if p["id"] == chosen else (0, 140, 255) if p["id"] in neighbors else (120, 120, 120)
-        cv2.circle(img, (x, y), 12 if p["id"] == chosen else 6, col, -1)
+        same_floor = abs(z - cz) < 1.5
+        cv2.circle(img, (x, y), 12 if p["id"] == chosen else 6, col, -1 if same_floor else 2)
         cv2.putText(img, (p["label"] or p["id"])[:18], (x + 8, y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.4, col, 1)
     cv2.putText(img, f"model {MODEL_ID}: red = chosen pano, orange = downloaded neighbours", (20, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
+    cv2.putText(img, "hollow = another floor; labels are Matterport scan numbers", (20, 54),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
     path.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(path), img)
 
@@ -264,21 +270,27 @@ def spoken_label(chosen: dict, override: str | None) -> str | None:
     if override:
         return override
     lab = (chosen.get("label") or "").strip()
-    return lab if re.search(r"[A-Za-z]", lab) else None
+    if re.search(r"[A-Za-z]", lab):
+        return lab
+    room = chosen.get("room")
+    if room and "/" not in room and room != "unlabelled":
+        return f"the {room.lower()}"
+    return None
 
 
 def write_pano_json(chosen: dict, panos: list[dict], downloaded: set[str], selected_by: str,
                     label: str | None = None, model_name: str | None = None) -> dict:
-    xy, v = horizontal(np.array([p["pos"] for p in panos]))
-    pos_of = {p["id"]: xy[i] for i, p in enumerate(panos)}
+    _, v = horizontal(np.array([p["pos"] for p in panos]))
+    pos_of = {p["id"]: np.asarray(p["pos"], float) for p in panos}  # 3D: other floors are far
     c = pos_of[chosen["id"]]
     meta = {
         "model_id": MODEL_ID, "model_name": model_name, "pano_id": chosen["id"], "label": label,
-        "scan_label": chosen["label"] or None,
+        "scan_label": chosen["label"] or None, "room": chosen.get("room"),
         "position": dict(zip("xyz", map(float, chosen["pos"]))), "vertical_axis": "xyz"[v],
         "selected_by": selected_by,
         "negatives": sorted(
-            [{"pano_id": p["id"], "label": p["label"], "position": dict(zip("xyz", map(float, p["pos"]))),
+            [{"pano_id": p["id"], "label": p["label"], "room": p.get("room"),
+              "position": dict(zip("xyz", map(float, p["pos"]))),
               "dist_m": round(float(np.linalg.norm(pos_of[p["id"]] - c)), 2)}
              for p in panos if p["id"] != chosen["id"] and p["id"] in downloaded],
             key=lambda n: n["dist_m"]),
@@ -286,6 +298,72 @@ def write_pano_json(chosen: dict, panos: list[dict], downloaded: set[str], selec
     PANO_DIR.mkdir(parents=True, exist_ok=True)
     (PANO_DIR / "pano.json").write_text(json.dumps(meta, indent=1))
     return meta
+
+
+# ---------------------------------------------------------------- rooms
+def _chain(pairs: list[tuple[str, str]], verts: dict) -> list[tuple[float, float]]:
+    """Order a room's boundary edges into a polygon; convex hull if they don't form one loop."""
+    pairs = [q for q in pairs if q[0] in verts and q[1] in verts]
+    if not pairs:
+        return []
+    order, used = [pairs[0][0], pairs[0][1]], {0}
+    while len(used) < len(pairs):
+        last = order[-1]
+        nxt = next((i for i, q in enumerate(pairs) if i not in used and last in q), None)
+        if nxt is None:
+            break
+        used.add(nxt)
+        a, b = pairs[nxt]
+        order.append(b if a == last else a)
+    if len(used) < len(pairs) or order[-1] != order[0]:
+        pts = np.array([verts[x] for q in pairs for x in q], np.float32)
+        return [tuple(map(float, q)) for q in cv2.convexHull(pts).reshape(-1, 2)]
+    return [verts[x] for x in order[:-1]]
+
+
+def room_polygons(resp: dict) -> list[dict]:
+    """Rooms (name = most confident classification) as floor-plan polygons, from the
+    quickstart's Rooms query: wall-graph vertices joined by edges, rooms as edge loops."""
+    m = resp["data"]["model"]
+    verts, edges = {}, {}
+    for f in m.get("floors") or []:
+        for vx in f.get("vertices") or []:
+            verts[vx["id"]] = (float(vx["position"]["x"]), float(vx["position"]["y"]))
+        for e in f.get("edges") or []:
+            ids = [x["id"] for x in e.get("vertices") or []]
+            if len(ids) == 2:
+                edges[e["id"]] = (ids[0], ids[1])
+    rooms = []
+    for r in m.get("rooms") or []:
+        cls = sorted(r.get("classifications") or [], key=lambda c: -(c.get("confidence") or 0))
+        label = cls[0].get("label") if cls else None
+        if label in (None, "", "Void"):
+            continue
+        eids = [e["id"] for e in ((r.get("boundary") or {}).get("edges") or [])]
+        poly = _chain([edges[e] for e in eids if e in edges], verts)
+        if len(poly) >= 3:
+            rooms.append({"id": r["id"], "label": label, "poly": np.array(poly, np.float32)})
+    return rooms
+
+
+def assign_rooms(panos: list[dict], rooms: list[dict]) -> None:
+    """Name the room each scan point stands in. Floors overlap in x, y and scan points
+    carry no floor id, so in a multi-storey building a point can fall inside rooms on
+    two floors: then both names are given, "Lobby / Office" (the z column tells floors)."""
+    for p in panos:
+        x, y = float(p["pos"][0]), float(p["pos"][1])
+        hits = [r for r in rooms if cv2.pointPolygonTest(r["poly"], (x, y), False) >= 0]
+        hits.sort(key=lambda r: cv2.contourArea(r["poly"]))
+        p["room"] = " / ".join(dict.fromkeys(r["label"] for r in hits)) or None
+
+
+def print_table(panos: list[dict]) -> None:
+    print(f"{'id':<28} {'scan':>4}  {'room':<26} {'x':>7} {'y':>7} {'z':>6}")
+    for p in sorted(panos, key=lambda q: (round(q["pos"][2]), q.get("room") or "~", int(q["label"])
+                                          if str(q["label"]).isdigit() else 0)):
+        x, y, z = p["pos"]
+        print(f"{p['id']:<28} {str(p['label'] or '-'):>4}  {(p.get('room') or '-')[:26]:<26} "
+              f"{x:7.2f} {y:7.2f} {z:6.2f}")
 
 
 # ---------------------------------------------------------------- fallback
@@ -349,6 +427,7 @@ def main(argv=None) -> int:
     ap.add_argument("--model", default=MODEL_ID, help="Matterport model id (default: the doc's demo model)")
     ap.add_argument("--label", default=None, help='spoken place name, e.g. "the main lobby"')
     ap.add_argument("--check", action="store_true", help="only check the key and whether it can see the model")
+    ap.add_argument("--list", action="store_true", help="only list scan points with their rooms; download nothing")
     a = ap.parse_args(argv)
     MODEL_ID = a.model
 
@@ -386,10 +465,15 @@ def main(argv=None) -> int:
     for p in plist:
         pid, label, pos = pano_fields(p, cfg)
         panos.append({"id": pid, "label": label, "pos": pos.tolist(), "raw": p})
-    print(f"{len(panos)} panoLocations for model {MODEL_ID}")
-    print(f"{'id':<28} {'label':<28} position")
-    for p in panos:
-        print(f"{p['id']:<28} {(p['label'] or '-')[:28]:<28} " + ", ".join(f"{v:.2f}" for v in p["pos"]))
+    print(f"{len(panos)} panoLocations for model {MODEL_ID}" + (f" ({model_name})" if model_name else ""))
+    if cfg.get("rooms_query") and not a.from_json:
+        try:
+            assign_rooms(panos, room_polygons(graphql(cfg, headers, cfg["rooms_query"], model_vars(cfg))))
+        except Exception as ex:  # noqa: BLE001 - room names are a convenience
+            print(f"room names unavailable ({type(ex).__name__}: {str(ex)[:200]})", file=sys.stderr)
+    print_table(panos)
+    if a.list:
+        return 0
 
     if not headers and (cfg.get("skybox_query") or cfg.get("faces_need_auth")):
         headers = auth_headers(cfg, credentials(cfg))
@@ -420,9 +504,9 @@ def main(argv=None) -> int:
     chosen = by_id[a.pano_id] if a.pano_id else next(r for r in ranked if r["id"] in kp or not kp)
     if not fetch_faces(chosen["id"]):
         raise SystemExit("could not download the chosen pano's faces: use the manual fallback (--import-faces)")
-    xy, _ = horizontal(np.array([p["pos"] for p in panos]))
+    P = np.array([p["pos"] for p in panos], float)  # 3D distance: a scan point upstairs is not a neighbour
     ci = [p["id"] for p in panos].index(chosen["id"])
-    order = np.argsort(np.linalg.norm(xy - xy[ci], axis=1))
+    order = np.argsort(np.linalg.norm(P - P[ci], axis=1))
     neighbors = [panos[i]["id"] for i in order if panos[i]["id"] != chosen["id"]][: a.neighbors]
     downloaded = {pid for pid in neighbors if fetch_faces(pid)} | {chosen["id"]}
     why = "--pano-id override" if a.pano_id else "fetch_matterport.py ranking (label, centrality, horizon keypoints)"
@@ -433,6 +517,7 @@ def main(argv=None) -> int:
     for n in meta["negatives"]:
         check_pano(PANO_DIR / n["pano_id"])
     print(json.dumps({"PANO_ID": chosen["id"], "label": label, "scan_label": chosen["label"],
+                      "room": chosen.get("room"),
                       "negatives": len(meta["negatives"]), "layout_ok": rep["ok"], "layout": rep["chosen"]}, indent=1))
     if not label:
         print('no spoken label: the scan label is a number. Re-run with --label "the main lobby" '
