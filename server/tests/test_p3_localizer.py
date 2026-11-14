@@ -139,3 +139,22 @@ def test_onsite_negative_frames_become_competing_views(tmp_path, room):
     n = L.info()["n_competitor_refs"]
     L.add_negative(frame(room, "room_p3", 10))  # live capture, no restart
     assert L.info()["n_competitor_refs"] == n + 1
+
+
+def test_try_photos_reports_each_photo(data, room, tmp_path, monkeypatch, capsys):
+    import cv2
+
+    import localize
+
+    monkeypatch.setenv("P3_MATCHER", "sift")
+    monkeypatch.setenv("P3_RETRIEVER", "classic")
+    shots = tmp_path / "photos"
+    shots.mkdir()
+    for k, (pid, yaw) in enumerate([("room_p0", 40), ("room_p0", 200), ("room_p3", 40)]):
+        img = room.render(pos3(pid), yaw, 0, 0, (540, 720), 55.0)
+        cv2.imwrite(str(shots / f"IMG_{k}.jpg"), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+    assert localize.main(["--try", str(shots), "--data-dir", str(data)]) == 0
+    out = capsys.readouterr().out
+    rows = [ln for ln in out.splitlines() if ln.startswith("IMG_")]
+    assert [r.split()[1] for r in rows] == ["YES", "YES", "no"]
+    assert "2 of 3 photos matched" in out

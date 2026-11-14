@@ -913,16 +913,55 @@ class Localizer:
 
 
 # ---------------------------------------------------------------- CLI
+PHOTO_EXT = (".jpg", ".jpeg", ".png")
+
+
+def try_photos(data_dir: Path, photo_dir: Path) -> int:
+    """Run the localizer on real photos, each judged on its own (no temporal fusion,
+    since photos in different directions would never agree on yaw). Prints, per photo,
+    whether it matches the locked scan point, the evidence and the heading."""
+    photo_dir = Path(photo_dir).expanduser()
+    files = sorted(p for p in photo_dir.iterdir() if p.suffix.lower() in PHOTO_EXT)
+    if not files:
+        heic = [p for p in photo_dir.iterdir() if p.suffix.lower() in (".heic", ".heif")]
+        hint = (" They are HEIC: convert them first with\n  mkdir -p jpg && sips -s format jpeg *.HEIC --out jpg/"
+                if heic else "")
+        print(f"no .jpg/.png photos in {photo_dir}.{hint}")
+        return 2
+    loc = Localizer(data_dir)
+    print(f"{'photo':<26} {'match':<5} {'inliers':>7} {'grid':>4} {'rival':>5} {'yaw':>6}  {'best view':<12} {'ms':>5}")
+    n_match = 0
+    for f in files:
+        img = cv2.imread(str(f), cv2.IMREAD_COLOR)  # applies the photo's EXIF rotation
+        if img is None:
+            print(f"{f.name[:26]:<26} unreadable")
+            continue
+        fe = loc.evaluate_frame(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), (), competitors="always")
+        ok, b = fe.decide(loc.s)
+        n_match += ok
+        yaw = "-" if not (ok and b and b.yaw is not None) else f"{b.yaw:6.1f}"
+        print(f"{f.name[:26]:<26} {'YES' if ok else 'no':<5} {b.inliers if b else 0:>7} {b.grid if b else 0:>4} "
+              f"{fe.best_comp_inliers():>5} {yaw:>6}  {(b.name if b else '-'):<12} {fe.total_ms:5.0f}")
+    print(f"\n{n_match} of {len(files)} photos matched the locked scan point "
+          f"({loc.pano_id}, '{loc.label}'). 'rival' = best inliers from another scan point; "
+          f"yaw is degrees in the pano frame.")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Part 3 localizer utilities")
     ap.add_argument("--prefetch", action="store_true", help="download weights, confirm offline load")
     ap.add_argument("--selfcheck", action="store_true", help="load the localizer, print PASS/FAIL")
+    ap.add_argument("--try", dest="try_dir", type=Path, default=None,
+                    help="run the localizer on the photos in a folder, each on its own")
     ap.add_argument("--data-dir", type=Path, default=DATA_DIR)
     a = ap.parse_args(argv)
     if a.prefetch:
         rep = prefetch_weights()
         print(json.dumps(rep, indent=1))
         return 0 if all("FAIL" not in v for v in rep.values()) else 1
+    if a.try_dir:
+        return try_photos(a.data_dir, a.try_dir)
     if a.selfcheck:
         try:
             loc = Localizer(a.data_dir)

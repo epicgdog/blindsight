@@ -9,20 +9,23 @@ Branch `part-3` (pull request epicgdog/blindsight#2). Commits are prefixed `part
 | `.env*` git-ignored before the first commit | done (`cb2bb95`) |
 | A1: Matterport credentials | keys come from `/costar-keys` in the track Discord; they go in `.env.local` on the laptop that downloads (declined for the cloud session) |
 | Matterport quickstart | **in hand** (pasted 2026-11-14): `data/matterport/api.json` holds its endpoint, basic auth, env var names and Panos query. Pano labels are scan numbers, so the spoken name comes from `--label` |
-| Is the demo model `6sd6A5r5EVp` reachable with the hackathon keys? | **no** (checked 2026-11-14): the key works and sees the 14,945 models of 'HackPrinceton 2026', but `model(id: "6sd6A5r5EVp")` answers not.found. Asked the CoStar track team to add it. Practice run meanwhile on the quickstart's house `zvKHR9DHNjJ` (real Matterport data, not the lobby) |
-| Code: fetch, refs, localizer, geometry, synthetic data/feed, calibrate, eval, tests | done; 41 tests pass (`make -f make/part3.mk p3-test`) |
-| Phase 3 acceptance (6 faces, contact sheet viewed, GET /api/pano) | **not met**: no pano data |
-| Phase 4 targets on the lobby (simulated set) | **not measured**: no pano data. No lobby number exists yet; the pitch must not quote any |
-| Pipeline validated end to end | yes, on a procedural test room: all Phase 4 targets pass there in the deployed config, stress test fails (see below); not the lobby |
+| Demo model | **Princeton - Rabinowitz Hall, `P3S6VUTP3qB`** (66 scan points, two floors), now the default in `fetch_matterport.py`. The doc's lobby model `6sd6A5r5EVp` answers not.found with the hackathon key (14,945 models visible); the CoStar track team was asked to add it |
+| Chosen scan point | scan 34, `az0h181td1h01x8x9gxhnp47a`, ground floor, in the large open area Matterport labels "Other" (scans 3, 4, 13, 15, 17, 20, 33, 34). Matterport labels every other room in this building "Hallway", so the room names could not identify a lobby. **To confirm:** the live demo must happen at this spot |
+| Spoken name | "Rabinowitz Hall" (`label` in `data/pano/pano.json`) |
+| Code | done; 49 tests pass (`make -f make/part3.mk p3-test`) |
+| Phase 3 acceptance | faces downloaded for the chosen scan point and its 20 nearest neighbours (by 3D distance), six equal 2048 px squares, layout verified automatically for all 21 (seam ratio 0.081 for scan 34), contact sheets opened on the laptop. Mirroring needs a person to confirm text reads forwards. `GET /api/pano` is Part 1's (`refs.pano_info()` is ready) |
+| Phase 4 targets | **met on simulated frames** from real Matterport data: Rabinowitz Hall scan 34 (results at the end of this file) and, earlier, the quickstart's house `zvKHR9DHNjJ` (commit `acc250e`). Report them as simulated |
+| Real phone frames | **not yet tested**. `make -f make/part3.mk p3-try DIR=...` runs the localizer on iPhone photos taken at the spot (and elsewhere, which must not match); `p3-hfov DIR=...` estimates the iPhone's real horizontal FOV from them |
+| Laptop | Intel Mac: SIFT and the weight-free retriever (no PyTorch builds for Intel Macs); 8.5 Hz measured |
 
-### What unblocks Part 3
+### Reproduce on a laptop
 
-On the laptop that will run the demo, in the repo folder:
+In the repo folder, with `.env.local` holding `MATTERPORT_API_KEY=...` and `MATTERPORT_API_TOKEN=...` (from `/costar-keys` in the track Discord):
 
-1. Create `.env.local` (git-ignored) with two lines, `MATTERPORT_API_KEY=...` and `MATTERPORT_API_TOKEN=...`, values from `/costar-keys` in the track Discord.
-2. `make -f make/part3.mk p3-access`: checks the key and whether it can see `6sd6A5r5EVp`. If not, ask the CoStar track team (#costar-group) how to reach the HackPrinceton lobby model, or fall back to `--import-faces`.
-3. `make -f make/part3.mk p3-fetch LABEL="the main lobby"`, then look at `data/matterport/topdown.png`, `data/pano/<PANO_ID>/contact_cross.jpg` and `horizon.jpg` (text must read forwards, faces upright and continuous).
-4. `make -f make/part3.mk p3-all` builds the reference views, the simulated set, the calibration, and writes the held-out results into the "Phase 4 results" section at the end of this file.
+1. `make -f make/part3.mk p3-access` checks the key and the model.
+2. `make -f make/part3.mk p3-list` lists every scan point with its room and height.
+3. `make -f make/part3.mk p3-fetch PANO=az0h181td1h01x8x9gxhnp47a LABEL="Rabinowitz Hall"`, then look at `data/matterport/topdown.png` and `data/pano/<PANO_ID>/contact_cross.jpg` (text must read forwards).
+4. `make -f make/part3.mk p3-all` builds the reference views, the simulated set, the calibration, and writes the held-out results at the end of this file.
 
 Matterport imagery is git-ignored (public repo); each machine downloads its own copy with its own key.
 
