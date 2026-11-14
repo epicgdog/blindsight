@@ -218,3 +218,14 @@ used to publish the branch without changing account permissions or creating cred
   **This is procedural-room verification, not lobby accuracy.**
 - The first combined Part 1 + Part 3 suite passed 119 tests. The expanded core suite
   passes 82 tests after adding native report/feed, pano metadata, reset and negative tests.
+
+## Delivery checkpoint
+
+The final isolated combined checkout passed **123 tests in 43.51 s**; the Part 1-only
+checkout passes **82 tests**. Neither teammate branch nor main was modified.
+
+The remote `part-1` branch was created through the signed-in browser, but it still
+points to the original main commit: source upload is blocked by the extension's
+local-file permission, and the connector still returns 403 on repository writes.
+All implementation commits are preserved on local `part-1` and in the delivered
+Git bundle. No account permissions or credentials were changed.
