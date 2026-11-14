@@ -79,3 +79,17 @@ test("headers carry pitch and roll when an attitude is available", async () => {
   assert.equal(headers[0].roll_deg, 1.5);
   assert.ok(!("pitch_deg" in headers[1]), "no attitude, no keys");
 });
+
+test("headers carry moving only when the detector has an answer", async () => {
+  const headers = []; let running = true;
+  const atts = [{ pitch_deg: 0, roll_deg: 0, moving: false }, { pitch_deg: 0, roll_deg: 0 }];
+  await runCaptureLoop({
+    isRunning: () => running,
+    capture: async () => ({ bytes: new Uint8Array([1]), w: 1, h: 1 }),
+    send: async (_b, h) => { headers.push(h); if (headers.length === 2) running = false; },
+    getHeading: () => 0,
+    getAttitude: () => atts[headers.length],
+  });
+  assert.equal(headers[0].moving, false);
+  assert.ok(!("moving" in headers[1]));
+});

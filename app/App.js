@@ -16,7 +16,7 @@ import { normalizeServerUrl } from "./src/address";
 import { base64ToBytes } from "./src/base64";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { AUDIO_MODE, speechOptions } from "./src/audio";
-import { attitudeFromGravity, smoothGravity } from "./src/attitude";
+import { attitudeFromGravity, createMotionDetector, smoothGravity } from "./src/attitude";
 import { ackBody, createAckTracker, sendAck, speechAckUrl } from "./src/ack";
 import { PICTURE_OPTIONS, PICTURE_SIZE, SAVE_OPTIONS, resizePlan } from "./src/camera";
 
@@ -39,6 +39,7 @@ export default function App() {
   const ackUrl = useRef(null);
   const attitude = useRef(null);
   const [pitch, setPitch] = useState(null);
+  const [moving, setMoving] = useState(null);
   const ackTracker = useRef(createAckTracker());
 
   useEffect(() => {
@@ -59,14 +60,17 @@ export default function App() {
   // Camera pitch and roll from gravity, sent with every frame so the server can check matches.
   useEffect(() => {
     let sub = null, gravity = null, last = 0, cancelled = false;
+    const motion = createMotionDetector();
     (async () => {
       if (!(await Accelerometer.isAvailableAsync()) || cancelled) return;
       Accelerometer.setUpdateInterval(100);
       sub = Accelerometer.addListener((g) => {
-        gravity = smoothGravity(gravity, g);
-        attitude.current = attitudeFromGravity(gravity);
         const now = Date.now();
-        if (now - last > 500 && attitude.current) { last = now; setPitch(attitude.current.pitch_deg); }
+        gravity = smoothGravity(gravity, g);
+        const m = motion.push(g, now);
+        const att = attitudeFromGravity(gravity);
+        attitude.current = att && typeof m === "boolean" ? { ...att, moving: m } : att;
+        if (now - last > 500 && att) { last = now; setPitch(att.pitch_deg); setMoving(m); }
       });
     })().catch((e) => console.log("accelerometer", e?.message));
     return () => { cancelled = true; sub?.remove(); };
@@ -150,7 +154,7 @@ export default function App() {
         placeholder="server address (wss://… or LAN ip:8000)" placeholderTextColor="#888" />
       <Button title={running ? "Stop" : "Start"} onPress={running ? stop : start} />
       <Text style={s.status}>
-        {status.connected ? "connected" : "disconnected"} · {status.state ?? "–"} · {fps.toFixed(1)} fps · pitch {pitch == null ? "–" : `${Math.round(pitch)}°`}
+        {status.connected ? "connected" : "disconnected"} · {status.state ?? "–"} · {fps.toFixed(1)} fps · pitch {pitch == null ? "–" : `${Math.round(pitch)}°`} · {moving == null ? "–" : moving ? "walking" : "still"}
       </Text>
       <CameraView ref={camera} style={s.preview} facing="back" pictureSize={PICTURE_SIZE} />
     </View>

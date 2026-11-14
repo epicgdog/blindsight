@@ -71,6 +71,8 @@ class FrameHeader:
     # Optional camera attitude from the phone's accelerometer (degrees). pitch: + looks up.
     pitch_deg: float | None = None
     roll_deg: float | None = None
+    # Optional: false when the phone's accelerometer says the user is not walking.
+    moving: bool | None = None
 
     def __post_init__(self):
         if type(self.seq) is not int or not 0 <= self.seq <= 2**53 - 1:
@@ -93,6 +95,8 @@ class FrameHeader:
                 type(value) not in (int, float) or not math.isfinite(value) or abs(value) > limit
             ):
                 raise ProtocolError(f"{name} must be null or within +/-{limit}")
+        if self.moving is not None and type(self.moving) is not bool:
+            raise ProtocolError("moving must be null or a boolean")
 
 
 @dataclass(frozen=True)
@@ -122,6 +126,7 @@ def decode_frame(data: bytes, max_bytes: int = MAX_MESSAGE_BYTES) -> FramePacket
             **{key: value[key] for key in ("seq", "ts_ms", "heading_deg", "w", "h")},
             pitch_deg=value.get("pitch_deg"),
             roll_deg=value.get("roll_deg"),
+            moving=value.get("moving"),
         )
     except (ValueError, TypeError, KeyError, UnicodeDecodeError, RecursionError) as exc:
         raise ProtocolError("Invalid frame header") from exc

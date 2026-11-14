@@ -23,3 +23,27 @@ export function smoothGravity(prev, next, alpha = 0.2) {
   const mix = (a, b) => a + (b - a) * alpha;
   return { x: mix(prev.x, next.x), y: mix(prev.y, next.y), z: mix(prev.z, next.z) };
 }
+
+// Walking detector from the raw accelerometer (units of g, gravity included). Walking bounces
+// the magnitude by roughly 0.1-0.3 g every step; standing or turning on the spot stays within a
+// few hundredths. Reports moving when the magnitude's spread over the last windowMs passes
+// moveG, and still again only once it falls below stillG (hysteresis). null until the
+// window has enough samples.
+export function createMotionDetector({ windowMs = 1500, moveG = 0.06, stillG = 0.035, minSamples = 8 } = {}) {
+  let samples = []; // { t, m }
+  let moving = null;
+  return {
+    push(g, t) {
+      if (!g || !finite(g.x) || !finite(g.y) || !finite(g.z) || !finite(t)) return moving;
+      samples.push({ t, m: Math.hypot(g.x, g.y, g.z) });
+      samples = samples.filter((s) => t - s.t <= windowMs);
+      if (samples.length < minSamples) return moving;
+      const mean = samples.reduce((a, s) => a + s.m, 0) / samples.length;
+      const sd = Math.sqrt(samples.reduce((a, s) => a + (s.m - mean) ** 2, 0) / samples.length);
+      if (moving !== true && sd > moveG) moving = true;
+      else if (moving !== false && sd < stillG) moving = false;
+      return moving;
+    },
+    get moving() { return moving; },
+  };
+}
