@@ -54,9 +54,18 @@ def get_frames(n: int):
     if p.exists():
         spec = importlib.util.spec_from_file_location("synthetic_feed", p)
         mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = mod
         spec.loader.exec_module(mod)
         if hasattr(mod, "frames"):
             return mod.frames(n)
+        if hasattr(mod, "iter_feed") and (ROOT / "data/pano/pano.json").exists():
+            def converted():
+                for frame in mod.iter_feed(fps=5, seconds=n / 5):
+                    img = Image.fromarray(frame.frame_rgb)
+                    buf = BytesIO()
+                    img.save(buf, "JPEG", quality=70)
+                    yield buf.getvalue(), img.width, img.height
+            return converted()
     return placeholder_frames(n)
 
 
