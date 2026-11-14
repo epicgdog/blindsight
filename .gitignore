@@ -28,3 +28,8 @@ data/eval/cache/
 # Python / tooling
 *.pyc
 data/pano/*/cache/
+
+# Matterport imagery stays on the machine that downloaded it (public repo; check the
+# track's data terms before publishing). pano.json, layout.json and calibration stay tracked.
+data/pano/**/*.jpg
+data/matterport/panoLocations.json
