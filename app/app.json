@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "Blindsight",
+    "slug": "blindsight",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": { "supportsTablet": false, "infoPlist": {
+      "NSCameraUsageDescription": "Blindsight streams the camera to your laptop to detect objects and locate you.",
+      "NSLocationWhenInUseUsageDescription": "Blindsight reads the compass heading."
+    } },
+    "plugins": ["expo-camera", "expo-location"]
+  }
+}
