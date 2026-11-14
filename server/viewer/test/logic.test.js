@@ -45,3 +45,10 @@ test("ref strip highlights only best_ref", () => {
   assert.deepEqual(out.map((r) => r.highlight), [false, true, false]);
   assert.deepEqual(refStrip(["a"], null).map((r) => r.highlight), [false]);
 });
+
+test("ref strip matches face names like face_2", () => {
+  const urls = ["/pano/face_0.jpg", "/pano/face_1.jpg", "/pano/face_2.jpg"];
+  assert.deepEqual(refStrip(urls, "face_2").map((r) => r.highlight), [false, false, true]);
+  assert.deepEqual(refStrip(urls, "/pano/face_1.jpg").map((r) => r.highlight), [false, true, false]);
+  assert.deepEqual(refStrip(urls, 0).map((r) => r.highlight), [true, false, false]);
+});
