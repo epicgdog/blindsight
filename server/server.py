@@ -182,6 +182,7 @@ class Pipeline:
             },
             "detections": [describe(d, self.settings.hfov_deg) for d in detections],
             "location": self.location.to_dict(),
+            "localization_debug": getattr(self.localizer, "last_debug", {}),
             "cue": asdict(cue) if cue else None,
             "mode": {"detector": self.settings.detector, "localizer": self.settings.localizer},
         }
@@ -459,6 +460,18 @@ def create_app(
                     lambda: json.loads(report.read_text())
                 )
         return result
+
+    @app.get("/api/localization")
+    async def localization_diagnostics():
+        runtime = app.state.runtime
+        latest = runtime.latest
+        return {
+            "phone_connected": runtime.phone_active,
+            "localizer_mode": settings.localizer,
+            "location": latest.result["location"] if latest else None,
+            "diagnostics": latest.result.get("localization_debug", {}) if latest else {},
+            "selected_scan_only": True,
+        }
 
     @app.post("/api/speech")
     async def speech(report: SpeechReport):

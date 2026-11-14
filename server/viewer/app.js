@@ -17,7 +17,11 @@ function render(r) {
     const badge = $("state-badge"); badge.textContent = loc.state; badge.className = stateClass(loc.state);
     $("score").textContent = loc.score.toFixed(2);
     $("inliers").textContent = loc.inliers;
-    $("yaw").textContent = `${Math.round(loc.yaw_deg)}°`;
+    $("yaw").textContent = loc.yaw_deg == null ? "unknown" : `${Math.round(loc.yaw_deg)}°`;
+    const diagnostic = r.localization_debug;
+    let reason = $("localization-reason");
+    if (!reason) { reason = document.createElement("p"); reason.id = "localization-reason"; $("state-badge").parentElement.append(reason); }
+    reason.textContent = diagnostic?.reason ? `Matching: ${diagnostic.reason.replaceAll("_", " ")} · inliers ${diagnostic.best_inliers ?? 0} · competing scan ${diagnostic.competitor_inliers ?? 0}` : "";
     history = pushHistory(history, loc.score);
     $("spark-line").setAttribute("points", sparklinePoints(history, 200, 40));
     renderRefs(loc.best_ref);

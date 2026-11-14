@@ -67,7 +67,7 @@ export default function App() {
     runCaptureLoop({
       isRunning: () => runningRef.current,
       capture: async () => {
-        const p = await camera.current.takePictureAsync({ quality: 0.3, exif: false, skipProcessing: true, base64: true });
+        const p = await camera.current.takePictureAsync({ quality: 0.3, exif: false, skipProcessing: false, base64: true });
         return { bytes: base64ToBytes(p.base64), w: p.width, h: p.height };
       },
       send: async (bytes, header) => {

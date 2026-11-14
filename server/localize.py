@@ -49,6 +49,7 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from localization_debug import localization_reason  # noqa: E402
 from geometry import (  # noqa: E402
     Features,
     ang_diff,
@@ -842,6 +843,14 @@ class Localizer:
                 "candidates": [(c.name, c.place, c.inliers, c.grid) for c in fe.cands],
                 "competitor_inliers": fe.best_comp_inliers(), "pending_jump": st.pending_jump,
                 "embedded": embed_now,
+                "reason": localization_reason(fe, self.s, matched, st.state),
+                "scope": "selected_scan_only",
+                "selected_pano_id": self.pano_id,
+                "thresholds": self.s.thresholds(),
+                "best_retrieval_score": float(ref.sim) if ref else None,
+                "best_inliers": int(best.inliers) if best else 0,
+                "best_grid_cells": int(best.grid) if best else 0,
+                "frame_shape": list(frame_rgb.shape),
             }
             return loc
 

@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 UV ?= uv
 CORE_FILES := server/__init__.py server/config.py server/protocol.py server/server.py \
+ server/localization_debug.py server/tests/test_localization_debug.py \
  server/tests/test_detailed_cues.py \
  server/navigation.py server/tests/test_navigation.py \
 	server/cues.py server/detect.py server/record.py server/localize_stub.py tools/sim_client.py \
