@@ -13,7 +13,7 @@ CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 def test_ranking_and_footprint_panels_present():
     html = (VIEWER / "index.html").read_text()
-    for el in ("rank-list", "cmp-live", "cmp-top", "pano-map", "equirect", "footprint"):
+    for el in ("rank-list", "cmp-live", "cmp-top", "pano-map", "equirect", "footprint", "mask-layer", "mask-note"):
         assert f'id="{el}"' in html, el
 
 
@@ -76,3 +76,5 @@ def test_viewer_renders_live_pano_ranking_and_footprint(server):
     assert names[0] == "Hallway" and "Other / Hallway" in names
     assert re.search(r'id="footprint".*<polygon', dom, re.S)
     assert re.search(r'id="cmp-live"[^>]*src="data:image/jpeg', dom)
+    assert re.search(r'id="mask-layer".*<polygon', dom, re.S)  # ignored people/furniture drawn
+    assert re.search(r'id="mask-note"[^>]*>\s*\d+ regions? ignored', dom)

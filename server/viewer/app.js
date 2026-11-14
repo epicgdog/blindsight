@@ -1,4 +1,4 @@
-import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, footprintPaths } from "./logic.js";
+import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, footprintPaths, maskPolygons, maskSummary } from "./logic.js";
 
 const $ = (id) => document.getElementById(id);
 let history = [], cueLog = [], times = [], faces = [], placeInfo = {}, mapPano = null;
@@ -82,6 +82,17 @@ function renderMatch(r) {
   }
 }
 
+function renderMasks(regions) {
+  const layer = $("mask-layer");
+  layer.replaceChildren();
+  for (const pts of maskPolygons(regions, 2048, 1024)) {
+    const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+    poly.setAttribute("points", pts);
+    layer.append(poly);
+  }
+  $("mask-note").textContent = maskSummary((regions ?? []).length);
+}
+
 function renderRefs(best) {
   const strip = $("ref-strip"); strip.replaceChildren();
   for (const r of refStrip(faces, best)) {
@@ -125,5 +136,5 @@ setInterval(async () => {
   } catch {}
 }, 2000);
 
-fetch("/api/pano").then((r) => r.json()).then((p) => { faces = p.faces; placeInfo = p.places ?? {}; }).catch(() => {});
+fetch("/api/pano").then((r) => r.json()).then((p) => { faces = p.faces; placeInfo = p.places ?? {}; renderMasks(p.masked_regions); }).catch(() => {});
 connect();

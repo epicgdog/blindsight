@@ -72,3 +72,20 @@ export function footprintPaths(poly, w, h) {
   const pts = (dx) => poly.map(([x, y]) => `${+(x * w + dx).toFixed(2)},${+(y * h).toFixed(2)}`).join(" ");
   return [pts(-w), pts(0), pts(w)];
 }
+
+// ---- regions of the pano that are ignored (people, furniture) ----
+// Draw each region once, plus a wrapped copy when it crosses the left or right edge.
+export function maskPolygons(regions, w, h) {
+  const out = [];
+  for (const poly of regions ?? []) {
+    const xs = poly.map((p) => p[0] * w);
+    const lo = Math.min(...xs), hi = Math.max(...xs);
+    for (const dx of [0, -w, w]) {
+      if (hi + dx < 0 || lo + dx > w) continue;
+      out.push(poly.map(([x, y]) => `${+(x * w + dx).toFixed(2)},${+(y * h).toFixed(2)}`).join(" "));
+    }
+  }
+  return out;
+}
+
+export const maskSummary = (n) => (n > 0 ? `${n} region${n === 1 ? "" : "s"} ignored (people, furniture)` : "");

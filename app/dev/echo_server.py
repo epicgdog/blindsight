@@ -122,7 +122,10 @@ def pano():
         "6sd6A5r5EVp-demo": {"room": "Hallway", "label": "0"},
         "echo-neighbour-1": {"room": "Other / Hallway", "label": "34"},
         "echo-neighbour-2": {"room": "Stairwell", "label": "12"},
-    }, "faces": [f"/pano/face_{i}.jpg" for i in range(6)],
+    }, "masked_regions": [
+        [[0.40, 0.55], [0.44, 0.55], [0.44, 0.70], [0.40, 0.70]],
+        [[0.62, 0.50], [0.66, 0.50], [0.66, 0.68], [0.62, 0.68]],
+    ], "faces": [f"/pano/face_{i}.jpg" for i in range(6)],
             "thresholds": {"locked": 0.7, "uncertain": 0.4}}
 
 

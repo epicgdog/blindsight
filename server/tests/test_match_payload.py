@@ -78,3 +78,81 @@ def test_pano_metadata_lists_place_names_for_the_viewer(tmp_path):
     meta = pano_metadata(Settings(data_dir=tmp_path, detector="stub", localizer="stub"))
     assert meta["places"]["p0"] == {"room": "Hallway", "label": "0"}
     assert meta["places"]["p1"] == {"room": "Other / Hallway", "label": "34"}
+
+
+# ---- reference-view masking wiring ----------------------------------------------------
+
+
+def test_masking_is_on_by_default_and_configurable(monkeypatch):
+    import importlib
+
+    import server.config as config
+
+    monkeypatch.delenv("MASK_REFS", raising=False)
+    assert importlib.reload(config).Settings().mask_refs is True
+    monkeypatch.setenv("MASK_REFS", "0")
+    assert importlib.reload(config).Settings().mask_refs is False
+    monkeypatch.delenv("MASK_REFS")
+    importlib.reload(config)
+
+
+def _capture_localizer(monkeypatch):
+    import importlib
+    from types import SimpleNamespace
+
+    seen = {}
+
+    class FakeLocalizer:
+        def __init__(self, data_dir=None, pano_id=None, ref_detector=None, ref_detector_id=None):
+            seen.update(ref_detector=ref_detector, ref_detector_id=ref_detector_id)
+
+    monkeypatch.setattr(
+        importlib, "import_module", lambda name: SimpleNamespace(Localizer=FakeLocalizer)
+    )
+    return seen
+
+
+def test_real_detector_is_handed_to_the_localizer_for_masking(settings, monkeypatch):
+    from dataclasses import replace
+
+    from server.server import make_localizer
+
+    seen = _capture_localizer(monkeypatch)
+
+    class RealDetector:
+        def detect(self, rgb):
+            return []
+
+    detector = RealDetector()
+    make_localizer(replace(settings, localizer="real", mask_refs=True), detector)
+    assert seen["ref_detector"] == detector.detect
+    assert "yolo" in seen["ref_detector_id"]
+
+
+def test_no_masking_with_stub_detector_or_when_disabled(settings, monkeypatch):
+    from dataclasses import replace
+
+    from server.detect import StubDetector
+    from server.server import make_localizer
+
+    seen = _capture_localizer(monkeypatch)
+    make_localizer(replace(settings, localizer="real", mask_refs=True), StubDetector())
+    assert seen["ref_detector"] is None
+    make_localizer(replace(settings, localizer="real", mask_refs=False), object())
+    assert seen["ref_detector"] is None
+
+
+class MaskedLocalizer(RankedLocalizer):
+    def masked_regions(self):
+        return [[[0.1, 0.4], [0.2, 0.4], [0.2, 0.6], [0.1, 0.6]]]
+
+
+def test_api_pano_lists_masked_regions(settings):
+    with TestClient(create_app(settings, localizer_factory=MaskedLocalizer)) as client:
+        regions = client.get("/api/pano").json()["masked_regions"]
+    assert regions == [[[0.1, 0.4], [0.2, 0.4], [0.2, 0.6], [0.1, 0.6]]]
+
+
+def test_api_pano_masked_regions_empty_without_support(settings):
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/api/pano").json()["masked_regions"] == []
