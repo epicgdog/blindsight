@@ -9,6 +9,7 @@ import importlib
 import io
 import json
 import logging
+import math
 import socket
 import sys
 import time
@@ -82,19 +83,28 @@ def make_localizer(settings: Settings):
 @dataclass
 class Warmup:
     deadline: float
+    duration_s: float = 20.0
     attempted: int = 0
     accepted: int = 0
     errors: int = 0
 
     def status(self):
         remaining = max(0.0, self.deadline - time.monotonic())
-        return {
+        result = {
             "active": remaining > 0,
             "remaining_s": remaining,
             "attempted": self.attempted,
             "accepted": self.accepted,
             "errors": self.errors,
         }
+        # Match the existing Part 2 viewer's warm-up progress contract.
+        result.update(
+            running=remaining > 0,
+            seconds=self.duration_s,
+            elapsed=min(self.duration_s, self.duration_s - remaining),
+            kept=self.accepted,
+        )
+        return result
 
 
 @dataclass
@@ -240,6 +250,7 @@ class Runtime:
     executor: ThreadPoolExecutor
     metrics: Metrics
     localizer_factory: object
+    initial_localizer: object = None
     latest: Processed | None = None
     phone_active: bool = False
     viewers: set = field(default_factory=set)
@@ -386,6 +397,14 @@ def create_app(
         result["mode"] = {"detector": settings.detector, "localizer": settings.localizer}
         result["phone_connected"] = runtime.phone_active
         result["warmup"] = runtime.warmup.status() if runtime.warmup else None
+        result["p50_ms"] = result["latency_ms"]["p50"]
+        result["p95_ms"] = result["latency_ms"]["p95"]
+        report = settings.data_dir / "reports" / "localization.json"
+        if report.is_file():
+            with suppress(OSError, ValueError):
+                result["localization_accuracy"] = await asyncio.to_thread(
+                    lambda: json.loads(report.read_text())
+                )
         return result
 
     @app.post("/api/speech")
@@ -412,7 +431,7 @@ def create_app(
             raise HTTPException(409, "Connect a frame source before starting warm-up")
         if runtime.warmup and runtime.warmup.status()["active"]:
             raise HTTPException(409, "Warm-up already active")
-        runtime.warmup = Warmup(time.monotonic() + seconds)
+        runtime.warmup = Warmup(time.monotonic() + seconds, seconds)
         return runtime.warmup.status()
 
     @app.get("/api/capture/auto")
@@ -421,7 +440,17 @@ def create_app(
         return (
             warmup.status()
             if warmup
-            else {"active": False, "attempted": 0, "accepted": 0, "errors": 0, "remaining_s": 0}
+            else {
+                "active": False,
+                "attempted": 0,
+                "accepted": 0,
+                "errors": 0,
+                "remaining_s": 0,
+                "running": False,
+                "seconds": 0,
+                "elapsed": 0,
+                "kept": 0,
+            }
         )
 
     @app.post("/api/capture/{kind}")
@@ -538,7 +567,7 @@ def create_app(
                 await asyncio.sleep(max(0.0, next_send - time.monotonic()))
                 if not queue.empty():
                     item = queue.get_nowait()
-                payload = {**item.result, "frame_jpeg": base64.b64encode(item.jpeg).decode("ascii")}
+                payload = {**item.result, "jpeg_b64": base64.b64encode(item.jpeg).decode("ascii")}
                 await asyncio.wait_for(websocket.send_json(payload), settings.send_timeout_s)
                 next_send = time.monotonic() + 1 / settings.viewer_fps
 
@@ -587,9 +616,31 @@ def self_check(settings: Settings) -> bool:
     except Exception:
         checks["real localizer loads"] = False
     metadata = pano_metadata(settings)
-    checks["pano loaded (six faces)"] = len(metadata["faces"]) == 6
+    pano_ok = len(metadata["faces"]) == 6
+    if pano_ok:
+        sizes = []
+        try:
+            for index in range(6):
+                path = settings.data_dir / "pano" / metadata["pano_id"] / f"face_{index}.jpg"
+                with Image.open(path) as face:
+                    face.verify()
+                    sizes.append(face.size)
+            pano_ok = len(set(sizes)) == 1 and sizes[0][0] == sizes[0][1]
+        except (OSError, ValueError):
+            pano_ok = False
+    checks["pano loaded (six equal square faces)"] = pano_ok
     calibration = metadata["thresholds"]
-    checks["calibration loaded"] = isinstance(calibration, dict) and bool(calibration)
+    calibration_ok = False
+    if isinstance(calibration, dict):
+        hi, lo = calibration.get("T_HI"), calibration.get("T_LO")
+        calibration_ok = (
+            type(hi) in (int, float)
+            and type(lo) in (int, float)
+            and math.isfinite(hi)
+            and math.isfinite(lo)
+            and -1 <= lo <= hi <= 1
+        )
+    checks["calibration loaded (T_LO <= T_HI)"] = calibration_ok
     # A server cannot prove acoustic output. Require an actual phone playback acknowledgment.
     try:
         from urllib.request import urlopen

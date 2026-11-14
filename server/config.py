@@ -1,5 +1,6 @@
 """Environment-backed configuration. Each team edits only its own marked block."""
 
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,6 +53,19 @@ class Settings:
     send_timeout_s: float = 2.0
 
     def __post_init__(self):
+        if not all(
+            math.isfinite(v)
+            for v in (
+                self.hfov_deg,
+                self.yolo_conf,
+                self.cooldown_s,
+                self.min_gap_s,
+                self.viewer_fps,
+                self.metrics_window_s,
+                self.send_timeout_s,
+            )
+        ):
+            raise ValueError("Numeric configuration must be finite")
         if self.localizer not in {"stub", "real"}:
             raise ValueError("LOCALIZER must be stub or real")
         if self.detector not in {"stub", "yolo"}:
@@ -64,6 +78,12 @@ class Settings:
             raise ValueError("Cooldown must be nonnegative; MIN_GAP_S must be >= 0.8")
         if not 0 < self.viewer_fps <= 10 or not 1 <= self.port <= 65535:
             raise ValueError("Invalid viewer frequency or port")
+        if self.metrics_window_s <= 0 or self.send_timeout_s <= 0:
+            raise ValueError("Metrics window and send timeout must be positive")
+        if self.pano_id and (
+            self.pano_id in {".", ".."} or Path(self.pano_id).name != self.pano_id
+        ):
+            raise ValueError("PANO_ID must be a directory name, not a path")
 
 
 # --- end part 1 ---

@@ -52,7 +52,7 @@ def test_http_and_websocket_contract(settings, packet):
                     "yaw_deg",
                     "yaw_conf",
                 }
-                with Image.open(io.BytesIO(base64.b64decode(displayed["frame_jpeg"]))) as frame:
+                with Image.open(io.BytesIO(base64.b64decode(displayed["jpeg_b64"]))) as frame:
                     assert frame.size == (48, 64)
                 assert client.post("/api/capture/pos").status_code == 200
                 assert client.post("/api/capture/neg").status_code == 200
@@ -76,6 +76,8 @@ def test_warmup_keeps_verified_only(settings, packet):
                 phone.receive_json()
             status = client.get("/api/capture/auto").json()
             assert status["attempted"] == 4 and status["accepted"] == 2
+            assert status["running"] and status["seconds"] == 20 and status["kept"] == 2
+            assert 0 <= status["elapsed"] <= 20
             assert len(list((settings.data_dir / "onsite/pos").glob("*.jpg"))) == 2
 
 

@@ -110,7 +110,7 @@ def decode_frame(data: bytes, max_bytes: int = MAX_MESSAGE_BYTES) -> FramePacket
         header = FrameHeader(
             **{key: value[key] for key in ("seq", "ts_ms", "heading_deg", "w", "h")}
         )
-    except (ValueError, TypeError, KeyError, UnicodeDecodeError) as exc:
+    except (ValueError, TypeError, KeyError, UnicodeDecodeError, RecursionError) as exc:
         raise ProtocolError("Invalid frame header") from exc
     jpeg = data[4 + size :]
     if not jpeg.startswith(b"\xff\xd8"):
