@@ -17,10 +17,10 @@ def run_node(*args, env=None, timeout=60):
 
 
 def test_node_unit_suite():
-    r = run_node("--test", "app/test/unit")
+    r = run_node("--test", "app/test/unit/*.test.js")
     assert r.returncode == 0, r.stdout + r.stderr
 
 
 def test_phone_pipeline_against_echo_server(server):
-    r = run_node("--test", "app/test/integration", env={"BLINDSIGHT_WS": server["ws"]})
+    r = run_node("--test", "app/test/integration/*.test.js", env={"BLINDSIGHT_WS": server["ws"]})
     assert r.returncode == 0, r.stdout + r.stderr
