@@ -185,3 +185,17 @@ main is performed by this Part 1 implementation.
 The initial Git CLI push was blocked by a missing credential-helper executable; the
 GitHub connector also rejected writes (403). The existing signed-in browser session is
 used to publish the branch without changing account permissions or creating credentials.
+
+## Final Part 1 verification
+
+- `make check`: **78 passed**, Ruff lint and format checks passed.
+- Ten consecutive 180-second recorded-session runs completed: **1800.44 seconds**,
+  **10,810/10,810** frames returned, **0** errors, invalid frames or dropped frames.
+  Per-run throughput stayed **6.002–6.005 fps**; worst per-run p95 RTT was
+  **140.08 ms**. Each run reconnected successfully without restarting the server.
+- This soak used real YOLO11n/MPS and the stub localizer; it proves Part 1 stability, not
+  Part 3 localization accuracy or phone audio latency. Some runs overlapped browser/ML
+  integration checks on the same machine. The final API/config validation changes were
+  covered separately by the 78-test suite and real viewer/client integration.
+- Full-demo readiness correctly reports missing real localizer, pano, calibration and
+  physical-phone speech acknowledgment. Those gates were not waived.
