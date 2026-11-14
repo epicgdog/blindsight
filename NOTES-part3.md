@@ -1,6 +1,6 @@
 # NOTES-part3: Matterport and localization
 
-Branch `part3-loc`. Commits are prefixed `part3:`.
+Branch `part-3` (pull request epicgdog/blindsight#2). Commits are prefixed `part3:`.
 
 ## Status, 2026-11-14
 
@@ -72,7 +72,7 @@ LOCK_NEED = int(_p3_os.environ.get("LOCK_NEED", _p3_cal.get("LOCK_NEED", 2)))
 
 ## Assumptions
 
-1. Branch name: the doc says `part3-loc`; the request was "a new branch called part 3". Used `part3-loc` so Part 1's merge flow finds it.
+1. Branch name: the doc says `part3-loc`; the request was "a new branch called part 3" and the team's branches are `part-1` and `part_2`, so the branch is `part-3`.
 2. Layout: `server/` is the uv project root (Part 1 doc), so `localize.py`, `geometry.py` and `refs.py` live in `server/`, tools in `tools/`, tests in `server/tests/test_p3_*.py`.
 3. `protocol.py` and `config.py` are not on main yet. `localize.py` imports `Detection` and `Location` from `protocol` and falls back to identical dataclasses until it exists; it reads `config.py` when present, else env, else `data/calibration.json`, else safe defaults.
 4. Matterport API: only `id`, `label` and `position` of panoLocations are taken as known (from PLAN.md); everything else comes from `data/matterport/api.json`.
