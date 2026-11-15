@@ -10,7 +10,8 @@ below the line, unchanged.
 LOCALIZER=real LOCALIZATION_SCOPE=single uv run python -m server.server
 # or, while editing code: models built once and kept in RAM, server code hot-reloads in ~1 s
 LOCALIZER=real LOCALIZATION_SCOPE=single uv run python3 -m server.devserver
-# phone app (Expo Go). Reload the app after pulling: expo-speech was removed.
+# phone app (Expo Go). Reload the app after pulling. The legacy screen has no on-device speech any more;
+# expo-speech stays installed only for the native-navigation screen (app/NativeNavigation.js).
 cd app && EXPO_PACKAGER_HOSTNAME=<your-tailscale-ip> EXPO_PUBLIC_SERVER_URL=wss://<your-funnel-host>/ws/phone npx expo start
 ```
 
@@ -93,11 +94,11 @@ Measured with the key (in-process server, stub localizer, real Live API):
 
 - `origin/main` = `945258b`: teammates' 5 commits plus our 23 cherry-picked on top (all tests passed
   then). Backup of the pre-rebase branch: `origin/feat/voice-agent`.
-- **Uncommitted, ours** (Live agent, streaming, Expo logs, TTS, expo-speech removal):
+- **Uncommitted, ours** (Live agent, streaming, Expo logs, TTS, no on-device speech in the legacy screen):
   - `server/agent.py`, `server/voice.py`, `server/server.py`, `server/tests/conftest.py`,
     `server/tests/test_agent.py`
   - `app/App.js`, `app/src/{voice,log,talk,audio}.js`, `app/test/unit/{voice,log,talk,audio}.test.js`
-  - `app/package.json` / `app/package-lock.json` (expo-speech removed)
+  - `app/package.json` / `app/package-lock.json` (expo-file-system added; expo-speech kept for NativeNavigation)
   - Tests at the end: 310 server, 76 app, all passing.
 - **Uncommitted, not ours** (another session or teammate; ask before committing):
   - `server/viewer/*` and `map3d.js`, `vendor/` (3D map)
