@@ -624,7 +624,10 @@ def create_app(
         if (place and ref.place != place) or (name and ref.view.name != name):
             raise HTTPException(404, "Reference changed")
         key = (id(localizer), idx)
-        data = ref_jpegs.get(key)
+        # Pano views keep a thumbnail and free their pixels at load; warm-up and photo refs keep pixels.
+        data = getattr(ref, "jpeg", None) or ref_jpegs.get(key)
+        if data is None and getattr(ref.view, "image", None) is None:
+            raise HTTPException(404, "Reference image not kept")
         if data is None:
             import cv2
 

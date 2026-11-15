@@ -375,8 +375,16 @@ class BowIndex:
 
     def __init__(self, feats: list[Features], k: int = 1024, sample: int = 30000, iters: int = 12, seed: int = 0):
         rng = np.random.default_rng(seed)
-        allD = np.concatenate([f.desc for f in feats if len(f)]).astype(np.float32)
-        D = allD[rng.choice(len(allD), min(sample, len(allD)), replace=False)]
+        # Same sample as concatenating every descriptor and indexing it, without building that
+        # concatenation (thousands of views x 1024 x 256 floats is several GB).
+        nz = [f for f in feats if len(f)]
+        offs = np.cumsum([0] + [len(f) for f in nz])
+        pick = rng.choice(int(offs[-1]), min(sample, int(offs[-1])), replace=False)
+        owner = np.searchsorted(offs, pick, side="right") - 1
+        D = np.empty((len(pick), nz[0].desc.shape[1]), np.float32)
+        for j in np.unique(owner):
+            m = owner == j
+            D[m] = nz[j].desc[pick[m] - offs[j]]
         k = int(min(k, max(8, len(D) // 20)))
         C = D[rng.choice(len(D), k, replace=False)].copy()
         for _ in range(iters):
@@ -597,6 +605,16 @@ class _Ref:
     feats: Features
     K: np.ndarray
     masks: list = field(default_factory=list)  # movable-object boxes (px) masked out of this view
+    emb: np.ndarray | None = field(default=None, repr=False)  # retrieval embedding, set at load
+    jpeg: bytes | None = field(default=None, repr=False)  # half-size thumbnail once view.image is freed
+
+
+def thumb_jpeg(img_rgb: np.ndarray, quality: int = 80) -> bytes | None:
+    """Half-size JPEG of a reference view, for the viewer (GET /api/ref/<idx>.jpg)."""
+    h, w = img_rgb.shape[:2]
+    small = cv2.resize(img_rgb, (max(1, w // 2), max(1, h // 2)), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", cv2.cvtColor(small, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, quality])
+    return buf.tobytes() if ok else None
 
 
 # ---------------------------------------------------------------- the Localizer
@@ -790,9 +808,17 @@ class Localizer:
                 views = build_refs(sampler, self.s.HFOV_DEG, self.ref_size, yaws=COMP_YAWS, pitches=(0,))
         masks = self._masks_for(pdir, views)
         feats = self._cached_features(pdir, views, masks)
+        new = []
         for v, f in zip(views, feats):
             w, h = v.image.shape[1], v.image.shape[0]
-            self._refs.append(_Ref(v, place, demo, f, intrinsics(w, h, v.hfov), list(masks.get(v.name, ()))))
+            new.append(_Ref(v, place, demo, f, intrinsics(w, h, v.hfov), list(masks.get(v.name, ()))))
+        # Embed now, while the images exist, then keep only a small JPEG of each view: the full
+        # rendered images of every place are gigabytes and nothing needs them after this.
+        for r, e in zip(new, self._pano_embeddings(place, new)):
+            r.emb = e
+            r.jpeg = thumb_jpeg(r.view.image)
+            r.view.image = None
+        self._refs += new
 
     def _load_onsite_negatives(self) -> None:
         """Frames captured away from the scan point (Part 1: POST /api/capture/neg ->
@@ -844,7 +870,7 @@ class Localizer:
                         if f"s{i}" in z:
                             f.cache["scores"] = z[f"s{i}"]
                         out.append(f)
-                    return out
+                    return self._compact(out)
             except Exception:  # noqa: BLE001 - a bad cache is just recomputed
                 pass
         out = [extract_features(self.matcher, normalize_contrast(v.image), masks.get(v.name) or ()) for v in views]
@@ -858,7 +884,15 @@ class Localizer:
             np.savez(cache, **arrs)
         except OSError:
             pass
-        return out
+        return self._compact(out)
+
+    def _compact(self, feats: list[Features]) -> list[Features]:
+        """Reference descriptors in RAM as float16 (half the memory) for LightGlue, which converts
+        them back to float32 on the device. SIFT's brute-force matcher needs float32: left alone."""
+        if self.matcher.name == "superpoint+lightglue":
+            for f in feats:
+                f.desc = f.desc.astype(np.float16)
+        return feats
 
     def _embed_imgs(self, refs: list[_Ref]) -> np.ndarray:
         imgs = []
@@ -867,36 +901,30 @@ class Localizer:
             imgs.append(blank_boxes(img, r.masks) if r.masks else img)
         return self.embedder.embed_batch(imgs)
 
+    def _pano_embeddings(self, place: str, group: list[_Ref]) -> np.ndarray:
+        """Embeddings of one place's pano views, cached per place (embedding thousands of views is slow)."""
+        names = [r.view.name for r in group]
+        tag = mask_key(json.dumps([names, [r.masks for r in group]]), 0)
+        cache = self.data_dir / "pano" / place / "cache" / f"emb_{self.embedder.name}_{tag}.npy"
+        if cache.exists():
+            try:
+                arr = np.load(cache, allow_pickle=False)
+                if arr.shape[0] == len(group):
+                    return arr
+            except Exception:  # noqa: BLE001 - a bad cache is just recomputed
+                pass
+        arr = self._embed_imgs(group)
+        try:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            np.save(cache, arr)
+        except OSError:
+            pass
+        return arr
+
     def _embed_refs(self, refs: list[_Ref]) -> np.ndarray:
-        """Embeddings for every reference. Pano views are cached per place (embedding thousands of
-        views is slow); on-site frames and other non-pano references are embedded fresh."""
-        out: list[np.ndarray | None] = [None] * len(refs)
-        groups: dict[str, list[int]] = {}
-        for i, r in enumerate(refs):
-            if r.view.source == "pano" and r.place != ONSITE_NEG:
-                groups.setdefault(r.place, []).append(i)
-        for place, idx in groups.items():
-            group = [refs[i] for i in idx]
-            names = [r.view.name for r in group]
-            tag = mask_key(json.dumps([names, [r.masks for r in group]]), 0)
-            cache = self.data_dir / "pano" / place / "cache" / f"emb_{self.embedder.name}_{tag}.npy"
-            arr = None
-            if cache.exists():
-                try:
-                    arr = np.load(cache, allow_pickle=False)
-                    if arr.shape[0] != len(group):
-                        arr = None
-                except Exception:  # noqa: BLE001 - a bad cache is just recomputed
-                    arr = None
-            if arr is None:
-                arr = self._embed_imgs(group)
-                try:
-                    cache.parent.mkdir(parents=True, exist_ok=True)
-                    np.save(cache, arr)
-                except OSError:
-                    pass
-            for k, i in enumerate(idx):
-                out[i] = arr[k]
+        """Embeddings for every reference: pano views were embedded when their place loaded;
+        on-site frames and other references are embedded fresh."""
+        out: list[np.ndarray | None] = [r.emb for r in refs]
         rest = [i for i, v in enumerate(out) if v is None]
         if rest:
             fresh = self._embed_imgs([refs[i] for i in rest])
@@ -909,7 +937,7 @@ class Localizer:
         demo = [r for r in self._refs if r.demo and r.view.source == "pano" and r.masks]
         if not demo:
             return []
-        h, w = demo[0].view.image.shape[:2]
+        w, h = self.ref_size  # pano views are rendered at ref_size (their images are freed after load)
         return region_polygons([r.view for r in demo], {r.view.name: r.masks for r in demo}, (w, h))
 
     # -- helpers ---------------------------------------------------------------

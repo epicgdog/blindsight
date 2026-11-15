@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
@@ -33,6 +34,7 @@ ROT_TOL_DEG = 3.0  # max angular residual for a match to count as rotation-consi
 GRID = 3  # inlier spread is measured on a GRID x GRID partition of the live frame
 GRID_CELL_MIN_PTS = 2  # a cell counts as covered when it holds this many inliers
 MIN_MATCHES = 8  # below this RANSAC is not attempted
+LG_CACHE_MAX = 256  # reference views whose LightGlue device tensors stay cached
 
 # COCO classes that move or change appearance. Their boxes are masked before
 # embedding and matching so crowds and moved furniture cannot drive localization.
@@ -279,12 +281,16 @@ class LightGlueMatcher:
         self.device = device or pick_device()
         self.extractor = SuperPoint(max_num_keypoints=max_keypoints).eval().to(self.device)
         self.matcher = LightGlue(features="superpoint").eval().to(self.device)
+        # Reference features keep their device tensors between frames, but only the most recently
+        # matched LG_CACHE_MAX of them: thousands of reference views at ~1 MB each would fill the GPU.
+        self._lru: OrderedDict[int, Features] = OrderedDict()
 
     def _feats(self, kpts, desc, scores, size):
         t = self.torch
         return {
             "keypoints": t.from_numpy(kpts)[None].to(self.device),
-            "descriptors": t.from_numpy(desc)[None].to(self.device),
+            # descriptors may be stored as float16 to halve RAM; LightGlue runs in float32
+            "descriptors": t.from_numpy(np.ascontiguousarray(desc, dtype=np.float32))[None].to(self.device),
             "keypoint_scores": t.from_numpy(scores)[None].to(self.device),
             "image_size": t.tensor([size], dtype=t.float32, device=self.device),
         }
@@ -312,18 +318,27 @@ class LightGlueMatcher:
         g.cache["scores"] = f.cache["scores"][keep]
         return g
 
-    def _lg(self, f: Features):
+    def _lg(self, f: Features, track: bool = False):
+        """Device tensors for f, cached on f. track=True (reference features) puts f in the LRU;
+        the live frame's tensors are not tracked and go away with the frame."""
         d = f.cache.get("lg")
         if d is None:
             d = self._feats(f.kpts, f.desc, f.cache["scores"], f.size)
             f.cache["lg"] = d
+        if track:
+            k = id(f)  # the LRU holds f itself, so the id stays unique while it is listed
+            self._lru[k] = f
+            self._lru.move_to_end(k)
+            while len(self._lru) > LG_CACHE_MAX:
+                _, old = self._lru.popitem(last=False)
+                old.cache.pop("lg", None)
         return d
 
     def match(self, query: Features, train: Features) -> tuple[np.ndarray, np.ndarray]:
         if len(query) < 2 or len(train) < 2:
             return np.zeros(0, int), np.zeros(0, int)
         with self.torch.inference_mode():
-            out = self.matcher({"image0": self._lg(query), "image1": self._lg(train)})
+            out = self.matcher({"image0": self._lg(query), "image1": self._lg(train, track=True)})
         m = out["matches"][0].cpu().numpy()
         return m[:, 0].astype(int), m[:, 1].astype(int)
 
