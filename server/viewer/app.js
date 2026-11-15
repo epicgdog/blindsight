@@ -1,7 +1,7 @@
-import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, mapMarkers, scene3d, pushTrail, yawText, errorText, frameMatch, pickRows, whyLines, headingArrow, headingText, pathLines } from "./logic.js";
+import { stateClass, pushHistory, sparklinePoints, boxStyle, fpsFromTimes, refStrip, rankRows, mapMarkers, scene3d, pushTrail, yawText, errorText, frameMatch, pickRows, whyLines, headingArrow, headingText, pathLines } from "./logic.js";
 
 const $ = (id) => document.getElementById(id);
-let history = [], cueLog = [], times = [], faces = [], placeInfo = {}, mapData = null, trail = [], lastResult = null, map3d = null, view3d = true;
+let history = [], times = [], faces = [], placeInfo = {}, mapData = null, trail = [], lastResult = null, map3d = null, view3d = true;
 
 function render(r) {
   lastResult = r;
@@ -30,12 +30,6 @@ function render(r) {
   renderMatch(r);
   renderMinimap(r);
   const now = Date.now();
-  cueLog = appendCue(cueLog, r.cue, now);
-  $("cue-log").replaceChildren(...cueLog.map((c) => {
-    const li = document.createElement("li"), t = document.createElement("time");
-    t.textContent = clock(c.ts); li.append(t, c.text); return li;
-  }));
-  $("cue-log").scrollTop = $("cue-log").scrollHeight;
   times = [...times, now].slice(-30);
   $("fps").textContent = `${fpsFromTimes(times).toFixed(1)} fps`;
   if (r.server_ms) $("latency").textContent = `server ${r.server_ms.total.toFixed(0)} ms`;
