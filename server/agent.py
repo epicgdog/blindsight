@@ -42,6 +42,8 @@ from server.heading import HeadingKalman, wrap180
 from server.place_window import PlaceWindow
 from server.route import TURN_DEG, clock
 from server.scene_memory import SceneMemory
+from server.config import HFOV_DEG
+from server.obstacles import CLEARANCE_M, ObstacleMap
 from server.venue import Start, Venue
 from server.voice import pcm_to_wav, wav_response
 
@@ -236,6 +238,7 @@ class AgentState:
             log.warning("venue data unavailable", exc_info=True)
             self.venue = None
         self.venue_dest: str | None = None  # HackPrinceton room being guided to
+        self.obstacles = ObstacleMap()  # detected objects on the floor; the drawn route bends around them
         self.venue_prefer: str | None = None
         self.heading = HeadingKalman(self.map.frames)
         self.place_label = place_label or self.map.label
@@ -358,7 +361,8 @@ class AgentState:
     def on_frame(self, t: float, match: dict | None, described: list[dict], location: dict,
                  jpeg: bytes | None = None, compass_deg: float | None = None,
                  moving: bool | None = None, steps: int | None = None,
-                 ts_ms: float | None = None) -> list[tuple[str, bool]]:
+                 ts_ms: float | None = None, pitch_deg: float | None = None, roll_deg: float | None = None,
+                 frame_wh: tuple[int, int] | None = None) -> list[tuple[str, bool]]:
         """Update from one processed frame. Returns (and emits) the events to speak: (text, urgent).
         ts_ms is the frame's capture time on the phone clock (see on_imu)."""
         with self.lock:
@@ -376,6 +380,7 @@ class AgentState:
             # Fused heading (PnP > matched view > calibrated compass), mesh frame; see server/heading.py.
             self._fuse_frame_heading(t, match, compass_deg, moving, ts_ms)
             self.memory.update(t, described, place)
+            self._update_obstacles(t, described, frame_wh, pitch_deg, roll_deg)
             if jpeg is not None:
                 self.jpeg = jpeg
             events = [(f"[urgent] {h}", True) for h in self._hazards(t, described)]
@@ -534,6 +539,37 @@ class AgentState:
                     "nav": self.guide.status, "heading": heading, "path": self._path_view(),
                     "venue": self.venue_view()}
 
+    # -- obstacles on the floor ------------------------------------------------
+    def _update_obstacles(self, t, described, frame_wh, pitch_deg, roll_deg) -> None:
+        try:
+            self.obstacles.update(t, described, frame_wh, pitch_deg, roll_deg, self.position,
+                                  self.heading.estimate.get("heading_deg"), HFOV_DEG)
+            if self.venue is None:
+                return
+            by_level: dict[str, list] = {}
+            for o in self.obstacles.active():
+                level = self.venue.level_of(o.z)
+                if level is None:
+                    continue
+                u, v = self.venue.to_px(level, o.x, o.y)
+                by_level.setdefault(level, []).append((u, v, (o.radius_m + CLEARANCE_M) * self.venue.scale(level)))
+            self.venue.set_obstacles(by_level)
+        except Exception:  # obstacles must never break guidance
+            log.exception("obstacle update failed")
+
+    def obstacle_view(self) -> list[dict]:
+        out = []
+        for o in self.obstacles.active():
+            d = o.to_dict()
+            if self.venue is not None:
+                level = self.venue.level_of(o.z)
+                if level is not None:
+                    d["level"] = level
+                    d["px"] = [round(v, 1) for v in self.venue.to_px(level, o.x, o.y)]
+                    d["r_px"] = round(o.radius_m * self.venue.scale(level), 1)
+            out.append(d)
+        return out
+
     # -- HackPrinceton venue rooms ----------------------------------------------
     def venue_start(self) -> Start | None:
         """Where the person is on the venue plans: the tracked position (level from its height),
@@ -568,6 +604,7 @@ class AgentState:
         return {"you": None if start is None else {"level": start.level, "px": [round(v, 1) for v in start.px],
                                                    "snapped_m": start.snapped_m},
                 "dest": None if self.venue_dest is None else self.venue.room_info(self.venue_dest),
+                "obstacles": self.obstacle_view(),
                 "route": self.venue_route()}
 
     def set_venue_destination(self, room: str | None, prefer: str | None = None) -> dict:
