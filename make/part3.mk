@@ -56,7 +56,7 @@ p3-places-test: ## which scan each phone photo is recognised as: DIR=... (subfol
 	$(P3_PY) -m server.property_localize --try "$(DIR)"
 
 # The whole server without PyTorch (Intel Macs): YOLO through OpenCV from an ONNX export.
-P3_SERVER_DEPS := $(P3_DEPS) --with fastapi --with "uvicorn[standard]" --with websockets --with pydantic --with anyio
+P3_SERVER_DEPS := $(P3_DEPS) --with fastapi --with "uvicorn[standard]" --with websockets --with pydantic --with anyio --with google-genai
 p3-server-lite: ## the server without PyTorch (Intel Mac): needs data/models/yolo11n.onnx; RECORD=1 to save frames
 	DETECTOR=onnx LOCALIZER=$${LOCALIZER:-real} LOCALIZATION_SCOPE=$${LOCALIZATION_SCOPE:-property} \
 		uv run --no-project $(P3_SERVER_DEPS) python -m server.server
