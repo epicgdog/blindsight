@@ -45,6 +45,20 @@ def test_window_ignores_frames_at_or_below_threshold():
     assert d.state == "unknown"
 
 
+def test_window_expires_even_when_camera_stops_sending():
+    w = PlaceWindow()
+    w.push(0, rank(("a", 200)))
+    assert w.decide(4).place == "a"
+    assert w.decide(6).state == "holding"
+    assert w.decide(11).place is None
+
+
+def test_unverified_localizer_result_cannot_drive_agent(tmp_path):
+    state = make_state(tmp_path)
+    state.on_frame(0, {"ranking": rank(("a", 200))}, [], {"state":"UNCERTAIN", "pano_id":"a"})
+    assert state.tool("get_location", {})["place"] == "unknown"
+
+
 # ---- graph and guidance --------------------------------------------------------------
 def test_wall_blocks_an_edge():
     walls = np.array([[1.0, -1.0, 1.0, 1.0]])
