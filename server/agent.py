@@ -565,7 +565,8 @@ class AgentState:
         if self.venue is None:
             return None
         start = self.venue_start()
-        return {"you": None if start is None else {"level": start.level, "px": [round(v, 1) for v in start.px]},
+        return {"you": None if start is None else {"level": start.level, "px": [round(v, 1) for v in start.px],
+                                                   "snapped_m": start.snapped_m},
                 "dest": None if self.venue_dest is None else self.venue.room_info(self.venue_dest),
                 "route": self.venue_route()}
 

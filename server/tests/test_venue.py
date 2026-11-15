@@ -131,6 +131,49 @@ def test_start_from_tracked_position_picks_the_level_by_height(venue):
     assert venue.start_from_position(None) is None
 
 
+def test_atrium_void_on_level_2_is_not_walkable(venue):
+    # the JRR atrium is open to Level 1 inside the Level 2 ring (no scan floor, X on the plan),
+    # and so is the Simpson atrium (X on the plan, no scan)
+    assert not venue.walkable("2", (410, 420)) and not venue.walkable("2", (700, 600))
+    assert venue.walkable("2", (440, 380))  # ring corridor, north side
+    assert venue.walkable("1", (515, 440))  # Level 1 atrium floor under the void
+
+
+def test_position_in_a_hole_snaps_to_the_nearest_corridor(venue):
+    x, y = venue.to_map("2", 410, 420)
+    s = venue.start_from_position({"x": x, "y": y, "z": 5.0})
+    assert s.level == "2" and venue.walkable("2", s.px)
+    assert 0 < s.snapped_m < 3 and s.px[0] < 400  # the west side of the ring, not across the void
+    on = venue.start_from_position({"x": 0.0, "y": -5.0, "z": 1.4})
+    if venue.walkable("1", venue.to_px("1", 0.0, -5.0)):
+        assert on.snapped_m == 0.0
+
+
+def test_route_never_starts_across_a_hole(venue):
+    start = Start("2", venue.snap("2", (410, 420))[0])
+    first = venue.route("201", start)["legs"][0]["px"]
+    assert venue.clear_line("2", first[0], first[1])
+
+
+def test_every_traced_corridor_node_on_scanned_levels_is_near_walkable_floor(venue):
+    # nodes on stairs or at a corridor end may sit on a wall line; the doors of 161 and 254
+    # (unscanned Simpson wing) are approximate on the plan
+    known = {("1", "las_e161"), ("2", "d_254")}
+    for level in ("1", "2"):
+        for name, px in venue.nodes[level].items():
+            if (level, name) in known:
+                continue
+            moved = venue.snap(level, px)[1]
+            assert moved < 2.5, (level, name, moved)
+
+
+def test_no_mask_means_no_snapping():
+    import json
+    from server.venue import DIR
+    v = Venue(json.loads((DIR / "venue.json").read_text()), json.loads((DIR / "align.json").read_text()))
+    assert v.snap("2", (410, 420)) == ((410.0, 420.0), 0.0) and v.walkable("2", (410, 420))
+
+
 def test_api(settings):
     with TestClient(create_app(settings)) as client:
         info = client.get("/api/venue").json()

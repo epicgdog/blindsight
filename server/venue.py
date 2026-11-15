@@ -21,6 +21,7 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -38,6 +39,8 @@ ELEVATOR_M = 15.0  # waiting and riding, per level
 TURN_DEG = 35.0  # a direction change above this is a spoken turn
 SCAN_FLOOR_LEVEL = {0: "1", 2: "2"}  # our scan floor index -> venue level
 LEVEL_Z_SPLIT_M = 3.4  # camera height above this (map z) is level 2, below is level 1
+SNAP_MAX_M = 8.0  # a position further than this from any walkable floor is left as is
+NODE_DETOUR_M = 12.0  # a route may start at a node this much further away to avoid crossing a hole
 
 _UNITS = {"zero": 0, "oh": 0, "o": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
           "seven": 7, "eight": 8, "nine": 9}
@@ -54,6 +57,7 @@ _FILLER = {"room", "rooms", "the", "to", "take", "me", "go", "where", "is", "are
 class Start:
     level: str
     px: tuple[float, float]
+    snapped_m: float = 0.0  # how far the position was moved onto walkable floor
 
 
 def spoken_numbers(text: str) -> str:
@@ -113,7 +117,9 @@ def _norm(text: str) -> str:
 
 
 class Venue:
-    def __init__(self, data: dict, align: dict, marked_path: Path | None = None):
+    def __init__(self, data: dict, align: dict, marked_path: Path | None = None, walk_dir: Path | None = None):
+        self.walk_dir = walk_dir  # walk_<level>.png masks (tools/venue_walkable.py); None: no snapping
+        self._walk: dict[str, Any] = {}
         self.levels = {lv["id"]: lv for lv in data["levels"]}
         self.rooms = {r["id"]: r for r in data["rooms"]}
         self.align = align
@@ -145,7 +151,7 @@ class Venue:
     @classmethod
     def load(cls, directory: Path = DIR, marked_path: Path | None = MARKED) -> "Venue":
         return cls(json.loads((directory / "venue.json").read_text()), json.loads((directory / "align.json").read_text()),
-                   marked_path)
+                   marked_path, walk_dir=directory)
 
     _shared: "Venue | None" = None
 
@@ -243,6 +249,63 @@ class Venue:
         a, b = (u - t["tx"]) / t["scale"], -(v - t["ty"]) / t["scale"]
         return (c * a + s * b, -s * a + c * b)
 
+    # -- where a person can stand ------------------------------------------------
+    def walk_mask(self, level: str):
+        """Bool array (plan pixels) of floor a person can stand on: corridors and event rooms,
+        minus holes (Level 2 atrium voids, open-to-below) found in the 3D scan or marked with an
+        X on the plan. None when there is no mask for the level."""
+        if level not in self._walk:
+            mask = None
+            path = self.walk_dir / f"walk_{level}.png" if self.walk_dir is not None else None
+            if path is not None and path.exists():
+                import numpy as np
+                from PIL import Image
+                mask = np.asarray(Image.open(path).convert("L")) > 127
+            self._walk[level] = mask
+        return self._walk[level]
+
+    def walkable(self, level: str, px) -> bool:
+        mask = self.walk_mask(level)
+        if mask is None:
+            return True
+        u, v = int(round(px[0])), int(round(px[1]))
+        return 0 <= v < mask.shape[0] and 0 <= u < mask.shape[1] and bool(mask[v, u])
+
+    def snap(self, level: str, px, max_m: float = SNAP_MAX_M) -> tuple[tuple[float, float], float]:
+        """The nearest walkable pixel to px (within max_m), and how far it moved in metres. A point
+        on walkable floor, or with nothing walkable near it, is returned unchanged."""
+        mask = self.walk_mask(level)
+        if mask is None or self.walkable(level, px):
+            return (float(px[0]), float(px[1])), 0.0
+        import numpy as np
+        r = int(math.ceil(max_m * self.scale(level)))
+        u, v = int(round(px[0])), int(round(px[1]))
+        u0, v0 = max(0, u - r), max(0, v - r)
+        ys, xs = np.nonzero(mask[v0:v + r + 1, u0:u + r + 1])
+        if not len(xs):
+            return (float(px[0]), float(px[1])), 0.0
+        d2 = (xs + u0 - px[0]) ** 2 + (ys + v0 - px[1]) ** 2
+        i = int(np.argmin(d2))
+        out = (float(xs[i] + u0), float(ys[i] + v0))
+        return out, round(self.px_dist(level, px, out), 2)
+
+    def clear_line(self, level: str, a, b, end_px: float = 4.0) -> bool:
+        """True when the straight line a -> b stays on walkable floor (ends excepted, since doors
+        and graph nodes can sit on a wall line)."""
+        mask = self.walk_mask(level)
+        d = math.dist(a, b)
+        if mask is None or d <= 2 * end_px:
+            return True
+        n = int(d // 2)
+        good = total = 0
+        for i in range(n + 1):
+            t = i / n
+            if d * t < end_px or d * (1 - t) < end_px:
+                continue
+            total += 1
+            good += self.walkable(level, (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t))
+        return total == 0 or good >= 0.85 * total
+
     def level_of(self, z: float | None = None, scan_floor: int | None = None) -> str | None:
         if z is not None and math.isfinite(z):
             return "2" if z > LEVEL_Z_SPLIT_M else "1"
@@ -255,7 +318,9 @@ class Venue:
         level = self.level_of(position.get("z"), scan_floor)
         if level is None:
             return None
-        return Start(level, self.to_px(level, float(position["x"]), float(position["y"])))
+        # a position in a hole, a wall or an office is moved to the nearest floor a person can stand on
+        px, moved = self.snap(level, self.to_px(level, float(position["x"]), float(position["y"])))
+        return Start(level, px, moved)
 
     # -- search ----------------------------------------------------------------
     def search(self, query: str, start: Start | None = None, limit: int = 5) -> list[dict]:
@@ -327,9 +392,17 @@ class Venue:
 
     # -- routing ---------------------------------------------------------------
     def nearest_node(self, start: Start) -> tuple[str, str]:
+        """The nearest graph node reachable in a straight line over walkable floor (so a route never
+        starts by crossing a hole or a wall), else the nearest node."""
         nodes = self.nodes[start.level]
-        name = min(nodes, key=lambda n: math.dist(nodes[n], start.px))
-        return (start.level, name)
+        order = sorted(nodes, key=lambda n: math.dist(nodes[n], start.px))
+        limit = math.dist(nodes[order[0]], start.px) + NODE_DETOUR_M * self.scale(start.level)
+        for name in order:
+            if math.dist(nodes[name], start.px) > limit:
+                break
+            if self.clear_line(start.level, start.px, nodes[name]):
+                return (start.level, name)
+        return (start.level, order[0])
 
     def route(self, to: str, start: Start, prefer: str | None = None, heading_deg: float | None = None) -> dict:
         """Shortest walk from start to the room's door. prefer: 'stairs' or 'elevator' (else the
