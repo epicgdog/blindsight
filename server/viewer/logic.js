@@ -168,7 +168,11 @@ export function mapMarkers(map, activeId, ranking, trail, w, h, position = null)
     markers.push({ id: "you", kind: "you", x: you.x, y: you.y, rank: 0 });
   }
   const active = map.points.find((p) => p.id === activeId);
-  return { floor, name: active ? scanName(active) : "", markers };
+  const project = (x, y) => {
+    const q = mapProject([{ id: "__p", x, y }], map.bounds, w, h, 24).__p;
+    return [q.x, q.y];
+  };
+  return { floor, name: active ? scanName(active) : "", markers, project };
 }
 
 // ---- facing arrow ----
@@ -238,6 +242,7 @@ function wallMarkers(map, activeId, ranking, trail, position = null) {
     walls,
     viewBox: { x: 0, y: 0, w: +((maxX - minX) * WALL_PX_PER_M).toFixed(2), h: +((maxY - minY) * WALL_PX_PER_M).toFixed(2) },
     otherFloor,
+    project: (x, y) => [px(x), py(y)],
   };
 }
 
@@ -250,7 +255,17 @@ export const WALL_HEIGHT_M = 2.5;
 // Scan point at the building entrance (scan 28), found by standing at the door with the phone.
 export const ENTRANCE_ID = "n0ppizy9u8xcadypd2bawceyc";
 
-export function scene3d(map, activeId, ranking, trail, position = null, headingDeg = null) {
+// The route (map metres) as SVG points, and the straight line from its start to the entrance.
+export function pathLines(path, project) {
+  if (!project || !path?.pts?.length) return null;
+  const f = ([x, y]) => project(x, y).join(",");
+  return {
+    route: path.pts.map(f).join(" "),
+    straight: path.goal ? [path.pts[0], path.goal].map(f).join(" ") : null,
+  };
+}
+
+export function scene3d(map, activeId, ranking, trail, position = null, headingDeg = null, path = null) {
   if (!map?.points?.length) return null;
   const ranked = (ranking ?? []).map((r) => r.place);
   const activePoint = map.points.find((p) => p.id === activeId);
@@ -284,5 +299,7 @@ export function scene3d(map, activeId, ranking, trail, position = null, headingD
     center: { x: +cx.toFixed(2), y: +cy.toFixed(2), z: +(ground + 1).toFixed(2) },
     focus: focus ? { id: focus.id, name: scanName(focus), floor: focus.floor ?? 0, otherFloor: focus.floor !== 0 } : null,
     heading_deg: Number.isFinite(headingDeg) ? headingDeg : null,
+    path: path?.pts?.length ? path.pts : null,
+    goal: path?.goal ?? null,
   };
 }

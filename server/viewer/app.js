@@ -1,4 +1,4 @@
-import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, mapMarkers, scene3d, pushTrail, yawText, errorText, frameMatch, pickRows, whyLines, headingArrow, headingText } from "./logic.js";
+import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, mapMarkers, scene3d, pushTrail, yawText, errorText, frameMatch, pickRows, whyLines, headingArrow, headingText, pathLines } from "./logic.js";
 
 const $ = (id) => document.getElementById(id);
 let history = [], cueLog = [], times = [], faces = [], placeInfo = {}, mapData = null, trail = [], lastResult = null, map3d = null, view3d = true;
@@ -111,7 +111,7 @@ function renderMinimap(r) {
   if (active) trail = pushTrail(trail, active, 8);
   const match = frameMatch(r);
   const position = match?.position ?? null; // tracked camera position (mesh frame), kept between fixes
-  const { floor, name, markers, walls, viewBox, otherFloor } = mapMarkers(mapData, active, match?.ranking, trail, 400, 400, position);
+  const { floor, name, markers, walls, viewBox, otherFloor, project } = mapMarkers(mapData, active, match?.ranking, trail, 400, 400, position);
   const svg = $("minimap");
   const NS = "http://www.w3.org/2000/svg";
   const nodes = [];
@@ -125,6 +125,20 @@ function renderMinimap(r) {
     nodes.push(path);
   } else {
     svg.setAttribute("viewBox", "0 0 400 400");
+  }
+  // Route to the entrance (solid; dimmer while only a preview) and the straight line (dashed).
+  const route = r.agent?.path ?? null;
+  const lines = pathLines(route, project);
+  if (lines) {
+    if (lines.straight) {
+      const s = document.createElementNS(NS, "polyline");
+      s.setAttribute("points", lines.straight); s.setAttribute("class", "mm-straight");
+      nodes.push(s);
+    }
+    const p = document.createElementNS(NS, "polyline");
+    p.setAttribute("points", lines.route);
+    p.setAttribute("class", route.guiding ? "mm-route" : "mm-route preview");
+    nodes.push(p);
   }
   for (const m of markers) {
     const c = document.createElementNS(NS, "circle");
@@ -147,13 +161,14 @@ function renderMinimap(r) {
   }
   svg.replaceChildren(...nodes);
   if (map3d) {
-    map3d.update(scene3d(mapData, active, match?.ranking, trail, position, heading?.heading_deg));
+    map3d.update(scene3d(mapData, active, match?.ranking, trail, position, heading?.heading_deg, route));
     $("mini-panel").classList.toggle("is3d", view3d);
   }
   $("mm-floor").textContent = floor == null ? "" : `Floor ${floor + 1}`;
   const tag = otherFloor ? " (another floor)" : active ? "" : name ? " (estimate)" : "";
   const you = position ? ` · you ±${position.sigma_m ?? "?"} m (${position.source ?? "track"})` : "";
-  const facing = headingText(heading);
+  const facing = [headingText(heading),
+    route?.length_m != null ? `route ${route.length_m} m${route.guiding ? "" : " (preview)"}` : ""].filter(Boolean).join(" · ");
   $("mm-place").textContent = [name ? `${name}${tag}` : "", you.replace(/^ · /, ""), facing].filter(Boolean).join(" · ");
 }
 

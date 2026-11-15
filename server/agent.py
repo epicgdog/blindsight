@@ -30,7 +30,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
 from server.cues import HAZARDS
-from server.entrance_nav import EntranceGuide, EntranceMap, describe_route, route_sentence
+from server.entrance_nav import EntranceGuide, EntranceMap, describe_route, plan, route_sentence, start_point
 from server.heading import HeadingKalman, wrap180
 from server.route import TURN_DEG, clock
 from server.place_window import PlaceWindow
@@ -444,7 +444,18 @@ class AgentState:
                        # raw phone compass (magnetic/true north, not the map frame), for comparison
                        "compass_deg": self._compass_buf[-1][1] if self._compass_buf else None}
             return {"decision": self.decision.to_dict(), "place_label": self.place_label(self.decision.place),
-                    "nav": self.guide.status, "heading": heading}
+                    "nav": self.guide.status, "heading": heading, "path": self._path_view()}
+
+    def _path_view(self) -> dict:
+        """The route for the viewer (map frame, metres): the one being guided, else a preview planned
+        from the decided place and tracked position. Plus the entrance, for a straight-line comparison."""
+        route, guiding = self.guide.route, self.guide.route is not None
+        if route is None and self.decision.place in self.map.points:
+            route = plan(self.map, *start_point(self.map, self.decision.place, self.position))
+        goal = self.map.points.get(self.map.goal)
+        return {"pts": [[round(x, 2), round(y, 2)] for x, y in route.pts] if route else None,
+                "guiding": guiding, "length_m": round(route.length, 1) if route else None,
+                "goal": [round(goal[0], 2), round(goal[1], 2)] if goal else None}
 
     # -- tools -----------------------------------------------------------------
     def tool(self, name: str, args: dict, describe=None) -> dict:

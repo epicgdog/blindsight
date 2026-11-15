@@ -44,7 +44,13 @@ export function createMap3d(host) {
   // direction is (sin h, 0, -cos h).
   const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(), 1.8, 0xff4fd8, 0.6, 0.35);
   arrow.visible = false;
-  scene.add(ring, beam, arrow);
+  // Route to the entrance (solid) and the straight line to it (dashed), just above the floor.
+  const routeLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x22d3ee }));
+  const straightLine = new THREE.Line(new THREE.BufferGeometry(),
+    new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 0.4, gapSize: 0.4, transparent: true, opacity: 0.6 }));
+  routeLine.visible = straightLine.visible = false;
+  let pathKey = "";
+  scene.add(ring, beam, arrow, routeLine, straightLine);
 
   function place() {
     const s = Math.sin(view.phi);
@@ -198,6 +204,20 @@ export function createMap3d(host) {
       const c = hot.kind === "active" ? COLORS.active : COLORS.estimate;
       ring.material.color.setHex(c); beam.material.color.setHex(c);
       if (hot.id !== focusId) { focusId = hot.id; goal.copy(top); goal.y = s.ground_z + 1; }
+    }
+    const pk = JSON.stringify([s.path, s.goal]);
+    if (pk !== pathKey) {
+      pathKey = pk;
+      const z = s.ground_z + 0.08;
+      const set = (line, pts) => {
+        line.visible = !!pts && pts.length > 1;
+        if (!line.visible) return;
+        line.geometry.dispose();
+        line.geometry = new THREE.BufferGeometry().setFromPoints(pts.map(([x, y]) => toThree(x, y, z)));
+        line.computeLineDistances();
+      };
+      set(routeLine, s.path);
+      set(straightLine, s.path && s.goal ? [s.path[0], s.goal] : null);
     }
     const from = s.points.find((p) => p.kind === "you") ?? hot;
     arrow.visible = !!from && Number.isFinite(s.heading_deg);
