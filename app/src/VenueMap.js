@@ -219,6 +219,15 @@ export default function VenueMap({ uri, lv, route, dest, you, headingDeg, insetT
   );
 }
 
+// viewBox of a compact map: spanPx wide around the centre, snapped to a 12 px grid so the plan
+// image is not redrawn on every small move of the dot.
+export function compactView(lv, compact, centre) {
+  const w = compact.spanPx, h = (compact.spanPx * compact.height) / compact.width;
+  const q = (v) => Math.round(v / 12) * 12;
+  const [cx, cy] = centre ? [q(centre[0]), q(centre[1])] : [lv.width / 2, lv.height / 2];
+  return `${(cx - w / 2).toFixed(0)} ${(cy - h / 2).toFixed(0)} ${w.toFixed(0)} ${h.toFixed(0)}`;
+}
+
 const s = StyleSheet.create({
   compact: { backgroundColor: "#ffffff", overflow: "hidden", alignItems: "center", justifyContent: "center" },
   clip: { overflow: "hidden" },

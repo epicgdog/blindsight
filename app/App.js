@@ -631,6 +631,22 @@ function LegacyApp() {
             )) : <Text style={s.hitNone}>No room matches “{venueQ.trim()}”</Text>}
           </View>
         ) : null}
+        {venueData && screen === "map" ? (
+          <View style={s.levels} pointerEvents="box-none">
+            {venueData.levels.map((l) => {
+              const on = l.id === level, onRoute = vRoute?.ok && vRoute.legs.some((g) => g.level === l.id);
+              const isYou = liveVenue?.you?.level === l.id;
+              return (
+                <Pressable key={l.id} style={[s.levelBtn, on && s.levelOn]} onPress={() => setLevelPick(l.id === (liveVenue?.you?.level ?? null) ? null : l.id)}
+                  accessibilityRole="button" accessibilityLabel={`Show ${l.name}`} accessibilityState={{ selected: on }}>
+                  <Text style={[s.levelText, on && s.levelTextOn]}>{l.id}</Text>
+                  {onRoute ? <View style={[s.levelDot, on && s.levelDotOn]} /> : null}
+                  {isYou ? <Text style={[s.levelYou, on && s.levelTextOn]}>you</Text> : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
       </View>
 
       {screen === "nav" && !(liveVenue?.you && vRoute?.ok && !vRoute.start_assumed) ? (
@@ -647,22 +663,6 @@ function LegacyApp() {
         </Pressable>
       ) : null}
 
-      {venueData && screen === "map" ? (
-        <View style={s.levels} pointerEvents="box-none">
-          {venueData.levels.map((l) => {
-            const on = l.id === level, onRoute = vRoute?.ok && vRoute.legs.some((g) => g.level === l.id);
-            const isYou = liveVenue?.you?.level === l.id;
-            return (
-              <Pressable key={l.id} style={[s.levelBtn, on && s.levelOn]} onPress={() => setLevelPick(l.id === (liveVenue?.you?.level ?? null) ? null : l.id)}
-                accessibilityRole="button" accessibilityLabel={`Show ${l.name}`} accessibilityState={{ selected: on }}>
-                <Text style={[s.levelText, on && s.levelTextOn]}>{l.id}</Text>
-                {onRoute ? <View style={[s.levelDot, on && s.levelDotOn]} /> : null}
-                {isYou ? <Text style={[s.levelYou, on && s.levelTextOn]}>you</Text> : null}
-              </Pressable>
-            );
-          })}
-        </View>
-      ) : null}
 
       <View style={s.side} pointerEvents="box-none">
         {screen === "map" ? <Pressable style={s.round} hitSlop={8} onPress={() => setMapPref((p) => (p === "follow" ? "north" : "follow"))}
@@ -914,7 +914,7 @@ const s = StyleSheet.create({
   hitTitle: { color: "#202124", fontSize: 16, fontWeight: "600" },
   hitSub: { color: "#5f6368", fontSize: 13, marginTop: 2 },
   hitNone: { color: "#5f6368", fontSize: 15, padding: 14 },
-  levels: { position: "absolute", left: 12, top: TOP + 70, gap: 8 },
+  levels: { alignSelf: "flex-start", marginTop: 8, gap: 8 }, // in the top column: under the search results
   levelBtn: { width: 46, minHeight: 46, borderRadius: 12, backgroundColor: "#fff", alignItems: "center", justifyContent: "center",
     paddingVertical: 4, ...shadow },
   levelOn: { backgroundColor: "#1a73e8" },
