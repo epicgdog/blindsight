@@ -11,6 +11,7 @@ import argparse
 import math
 from pathlib import Path
 
+import make_title_gif
 from build_deck import (
     AMBER,
     AMBER_SOFT,
@@ -44,9 +45,10 @@ from build_deck import (
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
-from pptx.util import Pt
+from pptx.util import Inches, Pt
 
 HERE = Path(__file__).resolve().parent
+TITLE_GIF = Path(__file__).resolve().parent / "insight-title.gif"
 NAME = "Insight"
 LINE_ONE = "Indoor navigation on your phone."
 
@@ -115,7 +117,14 @@ def s_title(prs):
          [[("HackPrinceton 2026", {"bold": True, "color": AMBER}),
            ("   Business and Enterprise track  ·  Forward Deployed Challenge", {})]],
          size=14, color=ON_INK_MUTED, name="Event")
-    phone(s, 9.2, 0.85, 3.0, 5.8)
+    # The phone is an animated GIF: the dot walks the route while the bubble gives directions.
+    gif = TITLE_GIF if TITLE_GIF.exists() else make_title_gif.main()
+    pic = s.shapes.add_picture(str(gif), Inches(9.2 - make_title_gif.MARGIN_IN),
+                               Inches(0.85 - make_title_gif.MARGIN_IN),
+                               Inches(make_title_gif.W_IN), Inches(make_title_gif.H_IN))
+    pic.name = "Phone walking the route (animated)"
+    pic._element.nvPicPr.cNvPr.set("descr", "A phone guiding a dot along a dotted route to a door: "
+                                   "turn right, turn left, you're at the entrance.")
     notes(s, "Open with the story, not the team.")
     return s
 
