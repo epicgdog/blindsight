@@ -16,7 +16,7 @@ import { normalizeServerUrl } from "./src/address";
 import { base64ToBytes } from "./src/base64";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { AUDIO_MODE } from "./src/audio";
-import { createVoicePlayer } from "./src/voice";
+import { createVoicePlayer, createVoiceDelivery } from "./src/voice";
 import { makeLog } from "./src/log";
 
 const logApp = makeLog("app"), logWs = makeLog("ws"), logTalk = makeLog("talk"), logMic = makeLog("mic"),
@@ -133,6 +133,10 @@ function LegacyApp() {
     ),
   ).current;
 
+  const delivery = useRef(null);
+  if (!delivery.current) delivery.current = createVoiceDelivery(
+    (path, options) => voice.current.playPath(path, options), text => speaker.announce(text));
+
   const start = useCallback(async () => {
     const url = normalizeServerUrl(address);
     if (!url) return;
@@ -154,7 +158,7 @@ function LegacyApp() {
         if (r.type === "voice") {
           // The Live agent's voice, streamed as short WAV segments over this socket.
           logWs("voice segment", { turn: r.turn, seq: r.seq, first: r.first, last: r.last, interrupt: r.interrupt });
-          if (r.url) voice.current.playPath(r.url, { interrupt: r.interrupt });
+          delivery.current.stream(r);
           return;
         }
         results += 1;
@@ -241,8 +245,7 @@ function LegacyApp() {
       },
       // While streaming, the reply already arrives as voice segments over the socket; otherwise play the clip.
       onResult: (out) => {
-        if (out.url && !runningRef.current) voice.current.playPath(out.url, { interrupt: true });
-        else if (!out.url) speaker.announce(out.reply);
+        delivery.current.reply(out);
       },
       announce: text => speaker.announce(text), state: setTalkState,
       busy: value => { talking.current = value; if (!value) quietOn(false); }, // a clip too short to send must not leave the agent muted

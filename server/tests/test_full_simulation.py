@@ -96,7 +96,9 @@ def test_rendered_camera_to_location_voice_tools_and_guidance_events(tmp_path, m
                 result = stream("room_p0")
                 assert result.get("cue") is None
                 time.sleep(0.05)
-            assert any(k == "event" and v.startswith("EVENT ") for k, v in session.sent), session.sent
+            assert any(k == "event" and v.startswith("EVENT ") for k, v in session.sent), (
+                session.sent
+            )
             assert viewer.receive_json()["jpeg_b64"]
             for _ in range(4):
                 result = stream("room_p1")

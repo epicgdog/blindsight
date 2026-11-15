@@ -99,7 +99,9 @@ class FrameHeader:
                 raise ProtocolError(f"{name} must be null or within +/-{limit}")
         if self.moving is not None and type(self.moving) is not bool:
             raise ProtocolError("moving must be null or a boolean")
-        if self.steps is not None and (type(self.steps) is not int or not 0 <= self.steps <= 2**53 - 1):
+        if self.steps is not None and (
+            type(self.steps) is not int or not 0 <= self.steps <= 2**53 - 1
+        ):
             raise ProtocolError("steps must be null or a nonnegative integer")
 
 

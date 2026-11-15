@@ -251,6 +251,7 @@ def test_live_agent_talk_calls_tools_and_speaks(tmp_path):
     assert out["reply"].startswith("Guiding you") and out["tools"][0]["name"] == "start_navigation"
     assert out["tools"][0]["result"]["ok"] and state.guide.active
     assert agent.clips[out["clip"]][:4] == b"RIFF"
+    assert out["turn"] and any(message["turn"] == out["turn"] for message in agent.outbox)
     assert [x[0] for x in session.sent[:4]] == ["context", "realtime", "realtime", "realtime"]  # ctx, start, audio, end
     assert ("event", "EVENT Turn right, to your 3 o'clock.") in session.sent
     segs = agent.take_outbox()  # no phone attached: segments wait in the outbox
@@ -275,10 +276,8 @@ def test_talk_endpoint_reports_errors(tmp_path):
     app = FastAPI()
     app.include_router(agent_router(lambda: agent))
     c = TestClient(app)
-    import subprocess
-
-    wav = subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", "0.5",
-                          "-f", "wav", "pipe:1"], capture_output=True, check=True).stdout
+    from server.voice import pcm_to_wav
+    wav = pcm_to_wav(bytes(16000), 16000)
     r = c.post("/api/agent/talk", files={"audio": ("clip.wav", wav, "audio/wav")})
     assert r.status_code == 200 and r.json()["detail"] == "out of credit" and not r.json().get("url")
     assert c.post("/api/agent/talk", files={"audio": ("clip.m4a", b"junk", "audio/m4a")}).status_code == 422
@@ -313,10 +312,8 @@ def test_talk_endpoint_accepts_raw_body(tmp_path):
     app = FastAPI()
     app.include_router(agent_router(lambda: agent))
     c = TestClient(app)
-    import subprocess
-
-    wav = subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", "0.5",
-                          "-f", "wav", "pipe:1"], capture_output=True, check=True).stdout
+    from server.voice import pcm_to_wav
+    wav = pcm_to_wav(bytes(16000), 16000)
     r = c.post("/api/agent/talk", content=wav, headers={"Content-Type": "audio/m4a"})
     assert r.status_code == 200 and r.json()["detail"] == "out of credit"  # decoded and reached the agent
     assert c.post("/api/agent/talk", content=b"", headers={"Content-Type": "audio/m4a"}).status_code == 422

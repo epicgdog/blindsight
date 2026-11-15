@@ -45,7 +45,7 @@ export async function postClip(fetchFn, url, uri, { readBytes, timeoutMs = 65000
       return { reply: "Sorry, the voice assistant had a problem.", heard: body.heard ?? "", tools,
         error: body.error ?? "no audio", detail: body.detail };
     }
-    return { url: body.url, reply: body.reply ?? "", heard: body.heard ?? "", tools, server_ms: body.ms, bytes: bytes.length };
+    return { url: body.url, turn: body.turn, reply: body.reply ?? "", heard: body.heard ?? "", tools, server_ms: body.ms, bytes: bytes.length };
   } catch (e) {
     return {
       reply: e?.name === "AbortError" ? "The voice assistant took too long. Please try again."

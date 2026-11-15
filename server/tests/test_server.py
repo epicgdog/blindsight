@@ -1,7 +1,6 @@
 import base64
 import io
 import json
-import time
 from dataclasses import replace
 
 import pytest
@@ -95,20 +94,28 @@ def test_stub_never_verifies(settings, packet):
 
 
 def test_latest_wins_and_event_loop_remains_responsive(settings, packet):
+    import threading
+
+    entered, release, completed = threading.Event(), threading.Event(), threading.Event()
+
     class SlowDetector:
         def detect(self, frame):
-            time.sleep(0.1)
+            entered.set()
+            release.wait(3)
+            completed.set()
             return []
 
     with TestClient(create_app(settings, detector=SlowDetector())) as client:
         with client.websocket_connect("/ws/phone") as phone:
             phone.send_bytes(packet(0))
-            time.sleep(0.02)
-            for seq in range(1, 31):
-                phone.send_bytes(packet(seq))
-            start = time.monotonic()
-            assert client.get("/healthz").status_code == 200
-            assert time.monotonic() - start < 0.08
+            try:
+                assert entered.wait(2)
+                for seq in range(1, 31):
+                    phone.send_bytes(packet(seq))
+                assert client.get("/healthz").status_code == 200
+                assert not completed.is_set(), "Health request waited for blocked inference"
+            finally:
+                release.set()
             seqs = []
             while not seqs or seqs[-1] != 30:
                 seqs.append(phone.receive_json()["seq"])

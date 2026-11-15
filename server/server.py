@@ -36,7 +36,6 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from server.agent import AgentState, LiveAgent, agent_router
-from server.voice import GeminiVoice, voice_router
 from server.config import Settings, env_bool
 from server.cues import CueEngine, describe
 from server.detect import Detector, StubDetector
@@ -45,6 +44,7 @@ from server.navigation import navigation_router
 from server.protocol import FramePacket, ProtocolError, decode_frame, parse_imu
 from server.record import SessionRecorder
 from server.spatial import spatial_router
+from server.voice import GeminiVoice, voice_router
 
 log = logging.getLogger("blindsight")
 
@@ -243,9 +243,17 @@ class Pipeline:
             # decides what to say, so the cue engine stays silent.
             cue = None
             try:
-                self.agent_state.on_frame(localized, match, described, self.location.to_dict(), jpeg,
-                                         compass_deg=hdr.heading_deg, moving=hdr.moving, steps=hdr.steps,
-                                         ts_ms=hdr.ts_ms)
+                self.agent_state.on_frame(
+                    localized,
+                    match,
+                    described,
+                    self.location.to_dict(),
+                    jpeg,
+                    compass_deg=hdr.heading_deg,
+                    moving=hdr.moving,
+                    steps=hdr.steps,
+                    ts_ms=hdr.ts_ms,
+                )
             except Exception:  # guidance must never break the frame pipeline
                 log.exception("Agent state update failed")
         else:
@@ -538,7 +546,9 @@ def create_app(
     app.include_router(
         agent_router(lambda: getattr(getattr(app.state, "runtime", None), "agent", None))
     )
-    app.include_router(voice_router(lambda: getattr(getattr(app.state, "runtime", None), "voice", None)))
+    app.include_router(
+        voice_router(lambda: getattr(getattr(app.state, "runtime", None), "voice", None))
+    )
     app.include_router(spatial_router(settings.data_dir))
 
     @app.get("/")
@@ -700,7 +710,12 @@ def create_app(
                     imu = parse_imu(message["text"])
                     if imu is not None and runtime.agent is not None:
                         runtime.agent.state.on_imu(
-                            received_s, imu["heading_deg"], imu["moving"], imu["steps"], phone_ms=imu["t_ms"])
+                            received_s,
+                            imu["heading_deg"],
+                            imu["moving"],
+                            imu["steps"],
+                            phone_ms=imu["t_ms"],
+                        )
                     continue
                 if raw is None:
                     runtime.metrics.invalid += 1
@@ -734,7 +749,9 @@ def create_app(
                     return
                 runtime.publish(item)
                 async with send_lock:
-                    await asyncio.wait_for(websocket.send_json(item.result), settings.send_timeout_s)
+                    await asyncio.wait_for(
+                        websocket.send_json(item.result), settings.send_timeout_s
+                    )
 
         async def push_voice():
             # The Live agent's audio, segment by segment, the moment each one exists.

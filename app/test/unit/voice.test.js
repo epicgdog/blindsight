@@ -1,6 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createVoicePlayer, voiceUrl, STALL_MS } from "../../src/voice.js";
+import { createVoicePlayer, createVoiceDelivery, voiceUrl, STALL_MS } from "../../src/voice.js";
+
+test("HTTP reply plays if socket delivered no audio; late segments do not repeat it", () => {
+  const played = [];
+  const delivery = createVoiceDelivery((path) => played.push(path), () => {});
+  delivery.reply({turn:"a", url:"/whole-a"});
+  delivery.stream({turn:"a", url:"/late-a", interrupt:true});
+  delivery.reply({turn:"a", url:"/whole-a"});
+  assert.deepEqual(played, ["/whole-a"]);
+});
+
+test("streamed answer is not replayed; another turn can fall back independently", () => {
+  const played = [], errors = [];
+  const delivery = createVoiceDelivery((path) => played.push(path), text => errors.push(text));
+  delivery.stream({turn:"a", url:"/segment-a"});
+  delivery.reply({turn:"a", url:"/whole-a"});
+  delivery.reply({turn:"b", url:"/whole-b"});
+  delivery.reply({reply:"Server unavailable"});
+  assert.deepEqual(played, ["/segment-a", "/whole-b"]);
+  assert.deepEqual(errors, ["Server unavailable"]);
+});
 
 test("voice url follows the websocket host and encodes the text", () => {
   assert.equal(voiceUrl("wss://box.ts.net/ws/phone", "Turn right, to your 2 o'clock."),
@@ -92,6 +112,7 @@ test("a clip that never starts is skipped after STALL_MS and the next one plays"
   v.playPath("/api/agent/clip/b");
   assert.equal(timers[0].ms, STALL_MS);
   timers[0].fn(); // a never started
+  assert.equal(p0.calls.at(-1)[0], "pause"); // prevent a late load from playing over b
   assert.equal(p1.calls.at(-1)[0], "play"); // b takes over
   assert.equal(p0.calls.filter((c) => c[0] === "play").length, 1);
 });

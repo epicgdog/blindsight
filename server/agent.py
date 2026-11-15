@@ -13,6 +13,7 @@ at /api/agent/clip/<id>; event clips ride the next frame result to the phone (re
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import math
@@ -21,6 +22,7 @@ import subprocess
 import threading
 import time
 import uuid
+import wave
 from collections import OrderedDict, deque
 from pathlib import Path
 
@@ -160,6 +162,13 @@ def gemini_client():
 
 def to_pcm16k(audio: bytes) -> bytes:
     """Any phone clip (m4a/AAC, wav) -> raw 16 kHz mono s16le PCM, the Live API input format."""
+    if audio.startswith(b"RIFF"):
+        try:
+            with wave.open(io.BytesIO(audio), "rb") as wav:
+                if wav.getnchannels() == 1 and wav.getsampwidth() == 2 and wav.getframerate() == 16000:
+                    return wav.readframes(wav.getnframes())
+        except (wave.Error, EOFError):
+            pass
     out = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", "pipe:0", "-ac", "1", "-ar", "16000",
                           "-f", "s16le", "pipe:1"], input=audio, capture_output=True, timeout=20, check=True)
     return out.stdout
@@ -641,7 +650,7 @@ class LiveAgent:
         if not (t["audio"] or t["heard"] or t["said"] or t["tools"]) and not self.pending:
             return  # stray empty turn marker
         p = self._take_pending(t)
-        out = {"heard": t["heard"].strip(), "reply": t["said"].strip(), "tools": t["tools"]}
+        out = {"turn": t["id"], "heard": t["heard"].strip(), "reply": t["said"].strip(), "tools": t["tools"]}
         if t["audio"]:
             clip_id = self._store(bytes(t["audio"]))  # whole turn, for the talk response and replay
             out.update(clip=clip_id, url=f"/api/agent/clip/{clip_id}")
@@ -754,7 +763,7 @@ def agent_router(get_agent) -> APIRouter:
                 raise HTTPException(422, "Audio clip could not be decoded") from ex
             agent.state.quiet = False
             try:
-                return await agent.talk(pcm)
+                return await asyncio.wait_for(agent.talk(pcm), timeout=45)
             except Exception as ex:  # noqa: BLE001 - the phone always gets an answer
                 log.exception("agent turn failed")
                 await agent.close()

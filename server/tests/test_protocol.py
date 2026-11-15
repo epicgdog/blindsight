@@ -129,7 +129,9 @@ def test_moving_must_be_boolean(moving):
 def test_header_steps_round_trips_and_defaults_to_none():
     jpeg = b"\xff\xd8" + b"0" * 10
     for steps in (0, 42, 2**53 - 1, None):
-        out = decode_frame(encode_frame(FrameHeader(1, 5.0, None, 10, 20, steps=steps), jpeg)).header
+        out = decode_frame(
+            encode_frame(FrameHeader(1, 5.0, None, 10, 20, steps=steps), jpeg)
+        ).header
         assert out.steps == steps
     raw = json.dumps({"seq": 1, "ts_ms": 1, "heading_deg": None, "w": 4, "h": 4}).encode()
     assert decode_frame(struct.pack(">I", len(raw)) + raw + b"\xff\xd8xx").header.steps is None
@@ -142,7 +144,9 @@ def test_steps_must_be_a_nonnegative_integer(steps):
 
 
 def test_a_wire_header_with_bad_steps_is_rejected():
-    raw = json.dumps({"seq": 1, "ts_ms": 1, "heading_deg": None, "w": 4, "h": 4, "steps": -5}).encode()
+    raw = json.dumps(
+        {"seq": 1, "ts_ms": 1, "heading_deg": None, "w": 4, "h": 4, "steps": -5}
+    ).encode()
     with pytest.raises(ProtocolError):
         decode_frame(struct.pack(">I", len(raw)) + raw + b"\xff\xd8xx")
 
@@ -156,10 +160,16 @@ def imu(**fields):
 
 def test_a_full_imu_sample_is_parsed():
     assert imu(t_ms=1234.5, heading_deg=90, moving=True, steps=10) == {
-        "t_ms": 1234.5, "heading_deg": 90.0, "moving": True, "steps": 10}
+        "t_ms": 1234.5,
+        "heading_deg": 90.0,
+        "moving": True,
+        "steps": 10,
+    }
 
 
-@pytest.mark.parametrize("text", ["not json", "[1, 2]", "3", "null", "{}", '{"type": "frame"}', '{"type": 5}', ""])
+@pytest.mark.parametrize(
+    "text", ["not json", "[1, 2]", "3", "null", "{}", '{"type": "frame"}', '{"type": 5}', ""]
+)
 def test_text_that_is_not_an_imu_sample_is_none(text):
     from server.protocol import parse_imu
 
@@ -171,12 +181,23 @@ def test_a_bad_field_becomes_none_and_the_rest_is_kept():
     assert out == {"t_ms": 10.0, "heading_deg": None, "moving": None, "steps": 7}
 
 
-@pytest.mark.parametrize("field, value", [
-    ("heading_deg", "90"), ("heading_deg", True), ("heading_deg", -1), ("heading_deg", 361),
-    ("t_ms", -5), ("t_ms", "1"),
-    ("moving", 1), ("moving", "true"),
-    ("steps", -1), ("steps", 2.5), ("steps", True), ("steps", "3"),
-])
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("heading_deg", "90"),
+        ("heading_deg", True),
+        ("heading_deg", -1),
+        ("heading_deg", 361),
+        ("t_ms", -5),
+        ("t_ms", "1"),
+        ("moving", 1),
+        ("moving", "true"),
+        ("steps", -1),
+        ("steps", 2.5),
+        ("steps", True),
+        ("steps", "3"),
+    ],
+)
 def test_each_imu_field_is_validated_on_its_own(field, value):
     out = imu(**{field: value})
     assert out[field] is None
@@ -192,4 +213,3 @@ def test_non_finite_numbers_are_dropped():
 def test_a_missing_field_is_none_and_heading_360_wraps_to_0():
     out = imu(heading_deg=360)
     assert out == {"t_ms": None, "heading_deg": 0.0, "moving": None, "steps": None}
-

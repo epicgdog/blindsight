@@ -25,6 +25,25 @@ export function voiceUrl(wsUrl, text) {
 // Every step is logged: queued, load, preload, loaded, playing, finished, cut, stalled, failed.
 export const STALL_MS = 6000; // a clip that has not started by then is skipped
 
+// Correlate HTTP answers with audio actually received over the socket, not a UI flag.
+export function createVoiceDelivery(playPath, announce) {
+  const streamed = new Set(), replayed = new Set();
+  const remember = (set, id) => { if (!id) return; set.add(id); if (set.size > 100) set.delete(set.values().next().value); };
+  return {
+    stream(message) {
+      if (!message.url || replayed.has(message.turn)) return;
+      remember(streamed, message.turn);
+      playPath(message.url, { interrupt: message.interrupt });
+    },
+    reply(result) {
+      if (!result.url) { announce(result.reply); return; }
+      if (result.turn && (streamed.has(result.turn) || replayed.has(result.turn))) return;
+      remember(replayed, result.turn);
+      playPath(result.url, { interrupt: true });
+    },
+  };
+}
+
 export function createVoicePlayer({ createPlayer, getWsUrl, log = () => {}, now = () => Date.now(),
   setTimer = setTimeout, clearTimer = clearTimeout }) {
   const players = [createPlayer(), createPlayer()];
@@ -106,7 +125,7 @@ export function createVoicePlayer({ createPlayer, getWsUrl, log = () => {}, now 
     current = c;
     speaking = true;
     c.timer = setTimer(() => {
-      if (current === c && !c.started) { log("stalled, skipping", { clip: shortUri(uri) }); finish("stalled"); next(); }
+      if (current === c && !c.started) { log("stalled, skipping", { clip: shortUri(uri) }); try { players[c.slot].pause(); } catch {} finish("stalled"); next(); }
     }, STALL_MS);
     log(warm ? "play preloaded" : "load", { clip: shortUri(uri), queue: queue.length });
     try {
