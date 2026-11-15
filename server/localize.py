@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import itertools
+import math
 import json
 import os
 import sys
@@ -1077,8 +1078,11 @@ class Localizer:
                 yaw_conf=round(float(st.conf), 3),
                 best_ref=ref.name if ref else None,
             )
+            match_view = self._match_view(fe, best, ref, st.yaw, frame_rgb.shape, position)
+            if match_view is not None:
+                match_view["heading_obs"] = heading_observation(matched, best, fix)
             self.last_debug = {
-                "match": self._match_view(fe, best, ref, st.yaw, frame_rgb.shape, position),
+                "match": match_view,
                 "position": fix.to_dict() if fix is not None else None,
                 "moving": moving, "jump_rejected": jump_rejected,
                 "distinctive_evidence": distinctive,
@@ -1139,6 +1143,8 @@ class Localizer:
             return None
         return {"place": self.tracker.place, "x": round(float(xyz[0]), 3), "y": round(float(xyz[1]), 3),
                 "z": round(float(xyz[2]), 3), "sigma_m": round(float(self.tracker.sigma_m), 3),
+                # Velocity (m/s, mesh frame): the walking direction, used for the heading.
+                "vx": round(float(self.tracker.x[2]), 3), "vy": round(float(self.tracker.x[3]), 3),
                 "still": still, "n": self.tracker.n_accepted,
                 "source": "pnp" if fix is not None and track.accepted else ("scan_point" if track.accepted else "track"),
                 "rejected": track.rejected, "reinit": track.reinit,
@@ -1346,3 +1352,18 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def heading_observation(matched: bool, best, fix) -> dict | None:
+    """This frame's own camera direction in the matched pano's frame, for the agent's heading
+    estimate: the reference-view yaw and, when PnP solved, the yaw of the camera's forward axis
+    (R_cw columns are right, down, forward in pano-local, y up). None without a verified match."""
+    if not matched or best is None or best.yaw is None:
+        return None
+    out = {"pano": best.place, "yaw": round(float(best.yaw), 2), "inliers": int(best.inliers), "pnp_yaw": None}
+    if fix is not None and getattr(fix, "R_cw", None) is not None:
+        f = np.asarray(fix.R_cw, float)[:, 2]
+        if abs(f[0]) + abs(f[2]) > 1e-6:
+            out["pnp_yaw"] = round(math.degrees(math.atan2(f[0], f[2])) % 360, 2)
+            out["pnp_inliers"] = int(fix.inliers)
+    return out
