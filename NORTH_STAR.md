@@ -208,3 +208,24 @@ the last known spot; the spoken steps cover that part.
 - Devpost listing and schedule: https://hackprinceton-fall-26.devpost.com/
 - AccessAble guide, Julis Romo Rabinowitz: https://www.accessableusa.com/princeton-university/access-guides/julis-romo-rabinowitz
 - Matterport API, model `P3S6VUTP3qB` (floors, rooms, floor plans in `data/matterport/floorplans/`)
+
+## Status (2026-11-15, 05:40)
+
+Built and pushed, one commit per feature:
+
+| Commit | What |
+|---|---|
+| `e27baa3` | Drop a pin and navigate there; blank map at start |
+| `2c55c36` | Venue: rooms by number or purpose, routes across levels (server/venue.py, server/venue/) |
+| `ce22713` | Agent: find_place / navigate_to, live room route from the tracked position |
+| `1434960` | App: venue plan as the map, search box, level tabs, route on every level, steps card |
+| `58bb9a1` | Mark restrooms and water fountains on site |
+
+How the plans are tied to the building: Levels 1 and 2 fitted to the Matterport scan (scan
+points on walkable plan pixels, 32/36 and 24/29); Level A registered to Level 1 by wall
+overlap; Level 2 checked against Level 1 by wall overlap too (agrees within 0.3 m).
+
+Every row of "Done means" resolves (tests in server/tests/test_venue.py). Not done:
+ARKit-carried position below the scan (step 5), so on Level A the path is drawn and spoken
+but the dot stays at the last scanned spot. Doors of rooms 161, 254 and 271 are approximate
+(marked as such; no left/right claim). Level B is out of scope.
