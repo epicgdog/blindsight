@@ -19,6 +19,7 @@ dependencies = [
   "rtree>=1,<2",
   "google-genai>=3.3.0",
   "python-multipart>=0.0.33",
+  "embreex>=4.4.0.post1",
 ]
 
 [build-system]

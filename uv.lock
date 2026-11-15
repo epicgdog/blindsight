@@ -54,6 +54,7 @@ source = { editable = "server" }
 dependencies = [
     { name = "anyio" },
     { name = "certifi" },
+    { name = "embreex" },
     { name = "fastapi" },
     { name = "google-genai" },
     { name = "lightglue" },
@@ -75,6 +76,7 @@ dependencies = [
 requires-dist = [
     { name = "anyio", specifier = ">=4,<5" },
     { name = "certifi", specifier = ">=2024.8" },
+    { name = "embreex", specifier = ">=4.4.0.post1" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "google-genai", specifier = ">=3.3.0" },
     { name = "lightglue", git = "https://github.com/cvg/LightGlue.git?rev=5a650c444718caffc2669dc0094cde908f42dd73" },
@@ -527,6 +529,29 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/fc/f8/98eea607f65de6527f8a2e8885fc8015d3e6f5775df186e443e0964a11c3/distro-1.9.0.tar.gz", hash = "sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed", size = 60722, upload-time = "2023-12-24T09:54:32.31Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/12/b3/231ffd4ab1fc9d679809f356cebee130ac7daa00d6d6f3206dd4fd137e9e/distro-1.9.0-py3-none-any.whl", hash = "sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2", size = 20277, upload-time = "2023-12-24T09:54:30.421Z" },
+]
+
+[[package]]
+name = "embreex"
+version = "4.4.0.post1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/da/fa/b9dcee0f524ad88132b0946e5e685a5020ec448e1d4064c20f83f2c83412/embreex-4.4.0.post1-cp311-cp311-macosx_13_0_arm64.whl", hash = "sha256:3ed370224566681071f245bbc5104feebee1354097679ab69cb3a70c94633cb3", size = 5052315, upload-time = "2026-10-21T22:48:21.465Z" },
+    { url = "https://files.pythonhosted.org/packages/74/4b/bd4289786a0c3728568214d8651db79f00fc8358790628fce794006fea3a/embreex-4.4.0.post1-cp311-cp311-macosx_13_0_x86_64.whl", hash = "sha256:85d9b232805e95be845ee5d77ddea4e6b21c992b7e60fa7bdf4f578b84797a15", size = 13225284, upload-time = "2026-10-21T22:48:23.839Z" },
+    { url = "https://files.pythonhosted.org/packages/26/60/3d959f55100ce829620c132cc5c5413e71d2fbcc2ffdede251c269a5a9ef/embreex-4.4.0.post1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:2cd0f7d5c6342e6247e31f700761689cae7829454d8c6de0c41e62124a023e1f", size = 14540499, upload-time = "2026-10-21T22:48:26.743Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/c1/ed524ec57b4e621932da5b10ffea7a67b43ba1fdc6f4648154f0258ff601/embreex-4.4.0.post1-cp311-cp311-win_amd64.whl", hash = "sha256:3df27becf6a12b59f5a469bc5271622e26387d52a15880edd29aa564246e7176", size = 13124357, upload-time = "2026-10-21T22:48:29.515Z" },
+    { url = "https://files.pythonhosted.org/packages/48/8e/4099a0c88a36207c4a18a9b800b4bc6d03ef1c266cad6724a2e130ff982f/embreex-4.4.0.post1-cp312-cp312-macosx_13_0_arm64.whl", hash = "sha256:a902809f99ac7a8bf1267a4a207d415a7a7e95a8d2b5e9d443a2cc291b9c1482", size = 5052543, upload-time = "2026-10-21T22:48:32.056Z" },
+    { url = "https://files.pythonhosted.org/packages/35/33/ac598c648dd66f783fa54c43272e6469e922787f471a7a6557e5c2022233/embreex-4.4.0.post1-cp312-cp312-macosx_13_0_x86_64.whl", hash = "sha256:1704af3c2e80fc6be4c1637402748ca20fd217980bd641dd3f228f7e09b0a461", size = 13224525, upload-time = "2026-10-21T22:48:34.347Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/fe/49e8e481cb0f460a7949617847d4afbd573f5c5e1cb3a8c4df509e3a4e8a/embreex-4.4.0.post1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:9ee31b8b40a129620e40e06ae5c0af088b12e5f52c583e43428b87a02786d6bb", size = 14593360, upload-time = "2026-10-21T22:48:37.281Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/3e/218cb6cdd12e361320c0c27c47ce284500e43322bdab9ed19ad76ab92474/embreex-4.4.0.post1-cp312-cp312-win_amd64.whl", hash = "sha256:6286204fdcd75465cc458e610319c19dcf898292211755cca13da7248db172ab", size = 13124419, upload-time = "2026-10-21T22:48:40.056Z" },
+    { url = "https://files.pythonhosted.org/packages/27/b0/1ff1ed093a271ded7be0504c25252913d8ba9f1f6868191d3c7865594267/embreex-4.4.0.post1-cp313-cp313-macosx_13_0_arm64.whl", hash = "sha256:8e0ec6325caab812cb428da4cecb8905b40c6d5bda386ffb73d44bbf2aa7af56", size = 5049816, upload-time = "2026-10-21T22:48:42.618Z" },
+    { url = "https://files.pythonhosted.org/packages/54/cc/895674c5495c275a265361dc5e6cbc0f10fb17df287a6c8c2dd94135ee82/embreex-4.4.0.post1-cp313-cp313-macosx_13_0_x86_64.whl", hash = "sha256:b8bd326b36151373adaad23268b60b39d20ec8a371eb1bae309a31e4ab78ac71", size = 13222545, upload-time = "2026-10-21T22:48:44.92Z" },
+    { url = "https://files.pythonhosted.org/packages/62/06/105609b3d692deab8738acf34d622589127f30dcd3fd512afd37ad862b7d/embreex-4.4.0.post1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:83165d2bb0436ab9b07d8e7236a0f2509c7868b3a85f2fbd8c41b4d023e88e38", size = 14549745, upload-time = "2026-10-21T22:48:47.974Z" },
+    { url = "https://files.pythonhosted.org/packages/23/e7/0b445ff1c11859373bd71fae849dd206d942678a5597106b38027d26476f/embreex-4.4.0.post1-cp313-cp313-win_amd64.whl", hash = "sha256:506009885b72923661f2b5cd3decd593b9340e3ef06ddb70763303fc5982253e", size = 13122025, upload-time = "2026-10-21T22:48:51.025Z" },
 ]
 
 [[package]]

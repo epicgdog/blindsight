@@ -20,6 +20,7 @@ other pano's surveyed position.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import queue
 import threading
@@ -30,6 +31,8 @@ import cv2
 import numpy as np
 
 from geometry import bearings, cam_to_world
+
+log = logging.getLogger("blindsight.position")
 
 PNP_REPROJ_PX = 4.0  # RANSAC reprojection threshold, pixels at working size
 PNP_MIN_INLIERS = 12
@@ -54,11 +57,28 @@ class BoxDepth:
         return o + np.where(ok, tmin, 0.0)[:, None] * d, ok
 
 
+def ray_caster(mesh):
+    """Ray intersector for a trimesh mesh: Embree (embreex, native code) when importable, else trimesh's
+    pure-Python triangle caster (about 150 rays/s on the mesh). The choice is logged once per load."""
+    import trimesh
+    from trimesh.ray import ray_triangle
+
+    if trimesh.ray.has_embree:
+        from trimesh.ray.ray_pyembree import RayMeshIntersector
+
+        name = "embree"
+    else:
+        RayMeshIntersector, name = ray_triangle.RayMeshIntersector, "triangle"
+    log.info("ray casting with %s", name)
+    return RayMeshIntersector(mesh)
+
+
 class MeshDepth:
     """Triangle mesh (trimesh), first hit per ray. Works in the mesh frame."""
 
     def __init__(self, mesh):
         self.mesh = mesh
+        self.ray = ray_caster(mesh)
 
     @classmethod
     def load(cls, path: str | Path) -> "MeshDepth":
@@ -73,7 +93,7 @@ class MeshDepth:
         if len(d) == 0:
             return pts, ok
         o = np.broadcast_to(np.asarray(origin, float), d.shape)
-        loc, idx, _ = self.mesh.ray.intersects_location(o, d, multiple_hits=False)
+        loc, idx, _ = self.ray.intersects_location(o, d, multiple_hits=False)
         pts[idx], ok[idx] = loc, True
         return pts, ok
 
