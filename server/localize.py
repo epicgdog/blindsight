@@ -946,6 +946,24 @@ class Localizer:
             return []
         return [int(i) for i in idx[np.argsort(-sims[idx])[:k]]]
 
+    def _top_places(self, scores: np.ndarray, mask: np.ndarray, k: int) -> list[int]:
+        """Best view of each of the top k places. With every pano a candidate place, the plain top k
+        views are often neighbouring yaws of one place, so the rival place is never verified and
+        the margin and ambiguity checks pass for want of a rival. One place: same as _top."""
+        if not self.multi:
+            return self._top(scores, mask, k)
+        idx = np.flatnonzero(mask)
+        places = self._ref_places()
+        out, seen = [], set()
+        for i in idx[np.argsort(-scores[idx])]:
+            p = places[i]
+            if p not in seen:
+                seen.add(p)
+                out.append(int(i))
+                if len(out) >= k:
+                    break
+        return out
+
     def _yaw_neighbor(self, yaw: float, pitch: float | None = None, place: str | None = None) -> int | None:
         """The pano view of a place nearest a yaw, in the reference row (pitch -10/0/+10) nearest
         the phone's pitch (0 when unknown)."""
@@ -1029,7 +1047,7 @@ class Localizer:
         demo_mask = self._is_pano_demo if pano_refs_only else self._is_demo
         top_demo_ids = self._top(sims, demo_mask, 1)
         top_any_ids = self._top(sims, demo_mask | ~self._is_demo, 1)
-        demo_ids = [i for i in self._top(sims, demo_mask, TOPK_DEMO) if sims[i] >= self.s.T_LO]
+        demo_ids = [i for i in self._top_places(sims, demo_mask, TOPK_DEMO) if sims[i] >= self.s.T_LO]
         if not verify_cands:
             t3 = time.perf_counter()
             return FrameEval([self._cand_of(i, sims) for i in demo_ids],
@@ -1040,7 +1058,7 @@ class Localizer:
         feats = extract_features(self.matcher, img, boxes)
         bow = self._bow.query(feats)
         via = {i: "retrieval" for i in demo_ids}
-        for src, ids in (("bow", self._top(bow, demo_mask, TOPK_DEMO_BOW)), ("extra", list(extra_demo or ()))):
+        for src, ids in (("bow", self._top_places(bow, demo_mask, TOPK_DEMO_BOW)),("extra", list(extra_demo or ()))):
             for i in ids:
                 if i is not None and i not in via:
                     via[i] = src
