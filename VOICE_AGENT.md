@@ -1,6 +1,6 @@
-# Blindsight Voice Agent: Plan
+# Insight Voice Agent: Plan
 
-Goal: a blind user **phones a number** (or messages it) and talks to Blindsight. No app to open. The agent knows where they are in the property, what the camera sees, and speaks directions.
+Goal: a blind user **phones a number** (or messages it) and talks to Insight. No app to open. The agent knows where they are in the property, what the camera sees, and speaks directions.
 
 Stack: **Photon (Spectrum)** for the phone/iMessage channel, **Gemini API** for the brain, **Vultr** for hosting.
 
@@ -13,7 +13,7 @@ flowchart LR
   U["Blind user<br/>phone call / iMessage"] <--> PH["Photon Spectrum<br/>iMessage line + SIP voice"]
   PH <-- "audio (RTP/SIP) + messages" --> VA["Voice agent (Node, Vultr)<br/>spectrum-ts + Gemini Live bridge"]
   VA <-- "WebSocket: PCM 16k in / 24k out, tool calls" --> G["Gemini Live API"]
-  VA -- "HTTP tools" --> BS["Blindsight server (FastAPI, Vultr)<br/>/api/pano, /api/navigation/*, detections"]
+  VA -- "HTTP tools" --> BS["Insight server (FastAPI, Vultr)<br/>/api/pano, /api/navigation/*, detections"]
   CAM["Camera source<br/>(see section 3)"] -- "JPEG frames /ws/phone" --> BS
 ```
 
@@ -46,7 +46,7 @@ Recommendation: **A + B for the demo, C as the stretch**. The voice agent reads 
 
 ## 4. Agent tools (Gemini function declarations)
 
-All tools are thin HTTP calls to the Blindsight server. The agent never invents location.
+All tools are thin HTTP calls to the Insight server. The agent never invents location.
 
 | Tool | Calls | Returns |
 | --- | --- | --- |
@@ -77,7 +77,7 @@ Safety rules baked into the system prompt (they mirror `NAVIGATION.md`):
 
 - One **Cloud Compute** instance, Ubuntu 24.04, 2 vCPU / 4 GB is enough (YOLO inference is the heavy part; if it is slow, size up or keep YOLO on the laptop and expose it through the existing tunnel).
 - Open ports: 443 (HTTPS/WSS), UDP range for RTP if Photon needs inbound media (**VERIFY**, may be outbound-only), 22 restricted to your IP.
-- Run with Docker Compose (`voice-agent`, `blindsight-server`, `caddy` for TLS). Caddy gets a cert for a domain or a `sslip.io` hostname. This replaces the Cloudflare quick tunnel for the cloud path.
+- Run with Docker Compose (`voice-agent`, `insight-server`, `caddy` for TLS). Caddy gets a cert for a domain or a `sslip.io` hostname. This replaces the Cloudflare quick tunnel for the cloud path.
 - Secrets: `.env` on the box (`GEMINI_API_KEY`, Photon credentials). Not in git.
 - Region: pick the Vultr region nearest the Photon and Google endpoints you test against. Measure round trip before demo.
 - Health: `/healthz` already exists on the server. Add one to the voice agent. Use `restart: unless-stopped`.
@@ -105,7 +105,7 @@ voice-agent/
     index.ts          # Spectrum handlers, call lifecycle
     gemini-live.ts    # WebSocket session, audio in/out, tool dispatch
     audio.ts          # codec and resampling
-    tools.ts          # HTTP calls to Blindsight server
+    tools.ts          # HTTP calls to Insight server
     prompt.ts         # system prompt and safety rules
   Dockerfile
 deploy/

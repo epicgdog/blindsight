@@ -49,7 +49,7 @@ export default function NativeNavigation() {
     } catch (error) { stop(); setStatus(error.message); }
   };
   return <View style={{ flex: 1, backgroundColor: "#101010", padding: 24, paddingTop: 64, gap: 18 }}>
-    <Text accessibilityRole="header" style={{ color: "white", fontSize: 30 }}>Blindsight navigation</Text>
+    <Text accessibilityRole="header" style={{ color: "white", fontSize: 30 }}>Insight navigation</Text>
     <TextInput accessibilityLabel="Server address" value={address} onChangeText={setAddress} autoCapitalize="none"
       style={{ color: "white", borderColor: "white", borderWidth: 1, padding: 14 }} />
     <Button title={running ? "Stop navigation" : "Start orientation"} onPress={running ? stop : start} />

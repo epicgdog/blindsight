@@ -25,7 +25,7 @@ MAIN_URL = os.environ.get("MAIN_URL", "http://127.0.0.1:8000").rstrip("/")
 PORT = int(os.environ.get("DEBUG_PORT", "8001"))
 HERE = Path(__file__).resolve().parent / "debug"
 
-app = FastAPI(title="Blindsight debug")
+app = FastAPI(title="Insight debug")
 client = httpx.AsyncClient(base_url=MAIN_URL, timeout=15.0)
 
 
@@ -98,7 +98,7 @@ async def relay(ws: WebSocket):
 def main():
     import uvicorn
 
-    print(f"Blindsight debug: http://localhost:{PORT}/  (reading {MAIN_URL})")
+    print(f"Insight debug: http://localhost:{PORT}/  (reading {MAIN_URL})")
     uvicorn.run(app, host="0.0.0.0", port=PORT, ws_max_size=16_000_000)
 
 

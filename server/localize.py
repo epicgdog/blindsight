@@ -6,7 +6,7 @@ Implements the contract from Part 1's protocol.py exactly:
         def update(self, frame_rgb, detections, heading_deg) -> Location
         def add_reference(self, frame_rgb) -> bool   # warm-up: verify, then add
 
-Pipeline for every frame (Blindsight Part 3 doc, Phase 4):
+Pipeline for every frame (Insight Part 3 doc, Phase 4):
  1. Mask movable things: boxes of person, chair, bags, ... (geometry.MOVABLE_CLASSES)
     are blanked before embedding and excluded from keypoints before matching.
  2. Retrieve (coarse): global embedding (DINOv2-small, fallbacks open_clip ViT-B-32

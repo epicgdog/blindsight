@@ -32,7 +32,7 @@ import numpy as np
 
 from geometry import bearings, cam_to_world
 
-log = logging.getLogger("blindsight.position")
+log = logging.getLogger("insight.position")
 
 PNP_REPROJ_PX = 4.0  # RANSAC reprojection threshold, pixels at working size
 PNP_MIN_INLIERS = 12

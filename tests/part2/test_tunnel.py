@@ -19,7 +19,7 @@ def fake_bin(tmp_path, body):
 
 def run(tmp_path, bin_dir, *args):
     env = {**os.environ, "PATH": f"{bin_dir}:/usr/bin:/bin:/usr/sbin:/sbin:{os.environ.get('PATH','')}",
-           "BLINDSIGHT_NO_EXPO": "1", "BLINDSIGHT_TUNNEL_TIMEOUT": "5"}
+           "INSIGHT_NO_EXPO": "1", "INSIGHT_TUNNEL_TIMEOUT": "5"}
     return subprocess.run(["bash", str(SCRIPT), *args], cwd=ROOT, env=env,
                           capture_output=True, text=True, timeout=30)
 
@@ -54,10 +54,10 @@ def test_prints_qr(tmp_path):
 
 
 def test_never_prints_secrets(tmp_path, monkeypatch):
-    monkeypatch.setenv("MATTERPORT_API_TOKEN", "blindsight-test-secret-do-not-print")
+    monkeypatch.setenv("MATTERPORT_API_TOKEN", "insight-test-secret-do-not-print")
     b = fake_bin(tmp_path, "exit 1\n")
     r = run(tmp_path, b, "--dry-run")
     # Exercise a known sentinel, never require or read the developer's credentials.
-    secrets = ["blindsight-test-secret-do-not-print"]
+    secrets = ["insight-test-secret-do-not-print"]
     for s in filter(None, secrets):
         assert s not in r.stdout + r.stderr

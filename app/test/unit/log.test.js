@@ -11,5 +11,5 @@ test("log lines carry time, tag, message and data", () => {
 
 test("clip and tts urls are shortened for the log", () => {
   assert.equal(shortUri("https://h/api/agent/clip/ab12"), "agent/clip/ab12");
-  assert.equal(shortUri("https://h/api/voice?text=Blindsight%20ready"), 'tts "Blindsight ready"');
+  assert.equal(shortUri("https://h/api/voice?text=Insight%20ready"), 'tts "Insight ready"');
 });

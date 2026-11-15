@@ -6,7 +6,7 @@ import { createCueSpeaker } from "../../src/speech.js";
 import { encodeFrame } from "../../src/protocol.js";
 import { runCaptureLoop } from "../../src/loop.js";
 
-const WS = process.env.BLINDSIGHT_WS;
+const WS = process.env.INSIGHT_WS;
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0xff, 0xd9]);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

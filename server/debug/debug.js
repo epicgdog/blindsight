@@ -1,4 +1,4 @@
-// Blindsight debug page: every localization stage for each frame (server/debug_server.py).
+// Insight debug page: every localization stage for each frame (server/debug_server.py).
 import { mapMarkers, pathLines, headingArrow, scene3d } from "/viewer/logic.js";
 
 const $ = (id) => document.getElementById(id);

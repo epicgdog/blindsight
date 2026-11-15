@@ -1,6 +1,6 @@
 # Demo runbook
 
-Everything needed to present Blindsight: the deck, the live demo, and what to do when it breaks. The script is in slides/pitch_script.md, the hard questions in slides/qa.md.
+Everything needed to present Insight: the deck, the live demo, and what to do when it breaks. The script is in slides/pitch_script.md, the hard questions in slides/qa.md.
 
 ## Roles (nobody multitasks)
 

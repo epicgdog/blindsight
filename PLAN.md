@@ -1,4 +1,4 @@
-# Blindsight Plan
+# Insight Plan
 
 Hackathon demo: phone camera streams to laptop, laptop runs object detection and localizes the user against a Matterport 360 panorama of the space.
 

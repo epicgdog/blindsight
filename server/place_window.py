@@ -16,12 +16,15 @@ kept as frame_confidence() for display.
 
 from __future__ import annotations
 
+import os
 from collections import deque
 from dataclasses import asdict, dataclass
 
-WINDOW_S = 5.0
-MARGIN = 1.3  # a win needs this many times the runner-up's inliers
-MIN_WINS = 3  # wins within the window that decide a place
+# Tuned for ~1 frame/s on the phone: neighbouring scan points (2-3 m apart) often score within
+# 10-20 % of each other, and 3 wins in 5 s at 1 fps with a 1.3x margin almost never happened.
+WINDOW_S = float(os.environ.get("PLACE_WINDOW_S", 8.0))
+MARGIN = float(os.environ.get("PLACE_MARGIN", 1.1))  # a win needs this many times the runner-up's inliers
+MIN_WINS = int(os.environ.get("PLACE_MIN_WINS", 2))  # wins within the window that decide a place
 UNKNOWN_AFTER_S = 10.0
 N_MIN = 30
 

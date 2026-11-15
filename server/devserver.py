@@ -23,7 +23,7 @@ from pathlib import Path
 import uvicorn
 from watchfiles import awatch
 
-log = logging.getLogger("blindsight.dev")
+log = logging.getLogger("insight.dev")
 
 SERVER_DIR = Path(__file__).resolve().parent
 # Modules whose objects live in RAM across reloads. Re-importing them would make the kept

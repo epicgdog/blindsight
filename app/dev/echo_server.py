@@ -1,6 +1,6 @@
 """Part 2 stand-in server: speaks contracts 5.1/5.2/5.3 with canned results.
 
-Run: uv run python3 app/dev/echo_server.py   (port from BLINDSIGHT_PORT, default 8000)
+Run: uv run python3 app/dev/echo_server.py   (port from INSIGHT_PORT, default 8000)
 Swapping to Part 1's real server is a URL change only.
 """
 import asyncio
@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 ROOT = Path(__file__).resolve().parents[2]
 VIEWER = ROOT / "server" / "viewer"
-DATA = Path(os.environ.get("BLINDSIGHT_DATA", ROOT / "data"))
+DATA = Path(os.environ.get("INSIGHT_DATA", ROOT / "data"))
 PANO_LABEL = "Main lobby"
 
 app = FastAPI()
@@ -184,4 +184,4 @@ def index():
 app.mount("/viewer", StaticFiles(directory=VIEWER), name="viewer")
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("BLINDSIGHT_PORT", 8000)), log_level="warning")
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("INSIGHT_PORT", 8000)), log_level="warning")

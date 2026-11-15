@@ -41,8 +41,8 @@ def jpeg_bytes() -> bytes:
 @pytest.fixture(scope="session")
 def server(tmp_path_factory):
     port = free_port()
-    env = {**os.environ, "BLINDSIGHT_PORT": str(port),
-           "BLINDSIGHT_DATA": str(tmp_path_factory.mktemp("part2-data"))}
+    env = {**os.environ, "INSIGHT_PORT": str(port),
+           "INSIGHT_DATA": str(tmp_path_factory.mktemp("part2-data"))}
     proc = subprocess.Popen(
         [sys.executable, str(ROOT / "app/dev/echo_server.py")],
         cwd=ROOT,

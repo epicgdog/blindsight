@@ -151,12 +151,44 @@ def _trusted(position: dict | None) -> bool:
     return float(position["sigma_m"]) <= TRACK_SIGMA_M
 
 
+CLEARANCE_M = 0.4  # a shortcut must keep this far from walls on both sides (half a body plus margin)
+
+
+def clear_wide(a, b, walls: np.ndarray, half: float = CLEARANCE_M) -> bool:
+    """clear_line for a corridor: the centre line and both lines offset by `half` cross no wall."""
+    if not clear_line(a, b, walls):
+        return False
+    d = np.asarray(b, float) - np.asarray(a, float)
+    n = float(np.hypot(*d))
+    if n < 1e-6:
+        return True
+    off = np.array([-d[1], d[0]]) / n * half
+    pa, pb = np.asarray(a, float), np.asarray(b, float)
+    return clear_line(pa + off, pb + off, walls) and clear_line(pa - off, pb - off, walls)
+
+
+def straighten(coords: list, walls: np.ndarray) -> list:
+    """String pulling: from each kept point, jump to the farthest later point with a clear,
+    wide line of sight. A straight shot when nothing is in the way; corners only at walls."""
+    if len(coords) <= 2:
+        return list(coords)
+    out, i = [coords[0]], 0
+    while i < len(coords) - 1:
+        j = len(coords) - 1
+        while j > i + 1 and not clear_wide(coords[i], coords[j], walls):
+            j -= 1
+        out.append(coords[j])
+        i = j
+    return out
+
+
 def plan(emap: "EntranceMap", xy, node: str) -> Route | None:
-    """Route from xy (standing next to map node `node`) to the entrance, or None if unreachable."""
+    """Route from xy (standing next to map node `node`) to the entrance, or None if unreachable.
+    The scan point path is straightened: it bends only where walls are in the way."""
     found = shortest_path(emap.graph, node, emap.goal)
     if found is None:
         return None
-    return Route([xy] + [emap.points[n] for n in found[0]])
+    return Route(straighten([xy] + [emap.points[n] for n in found[0]], emap.walls))
 
 
 def steps_text(meters: float, stride: float) -> str:

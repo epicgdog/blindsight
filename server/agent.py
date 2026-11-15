@@ -37,7 +37,7 @@ from server.place_window import PlaceWindow
 from server.scene_memory import SceneMemory
 from server.voice import pcm_to_wav, wav_response
 
-log = logging.getLogger("blindsight.agent")
+log = logging.getLogger("insight.agent")
 
 ROOT = Path(__file__).resolve().parents[1]
 LIVE_MODEL = "gemini-3.8-live"
@@ -65,7 +65,7 @@ COURSE_MAX_SIGMA_M = 1.5  # ...from a tracked position at least this sure
 FIRST_SEGMENT_BYTES = 48_000  # 1 s
 SEGMENT_BYTES = 96_000  # 2 s per segment (24 kHz, 16-bit mono)
 
-SYSTEM_PROMPT = """You are Blindsight: a warm, calm companion walking beside a blind person indoors, talking
+SYSTEM_PROMPT = """You are Insight: a warm, calm companion walking beside a blind person indoors, talking
 with them through their phone. Sound like a friend who knows the building, not a navigation device.
 
 How to talk
@@ -238,6 +238,8 @@ class AgentState:
                 # place is known, from where the person stands and faces. stop_navigation turns it off.
                 if AUTO_NAV:
                     self.guide.start(None)
+            elif AUTO_NAV and not self.guide.active:
+                self.guide.start(None)  # a new phone session always starts guiding to the entrance
             self.decision = self.window.decide(0.0)
             self.position = self.yaw_deg = self.jpeg = None
             self._received_at = time.monotonic()
@@ -315,8 +317,11 @@ class AgentState:
 
     @staticmethod
     def _deliver(events: list[tuple[str, bool]], emit) -> None:
+        # AGENT_EVENTS: "all" speaks guidance on its own; "urgent" (default) speaks only very close
+        # obstacle warnings, so the agent otherwise talks only when the mic is used; "none" is silent.
+        mode = os.environ.get("AGENT_EVENTS", "urgent")
         for text, urgent in events:
-            if emit is not None:
+            if emit is not None and (mode == "all" or (mode == "urgent" and urgent)):
                 emit(text, urgent)
 
     def on_frame(self, t: float, match: dict | None, described: list[dict], location: dict,
@@ -794,6 +799,19 @@ def agent_router(get_agent) -> APIRouter:
         """The phone calls this when the talk button goes down (on) and up (off)."""
         need().state.quiet = on
         return {"quiet": on}
+
+    @router.post("/nav")
+    async def nav(on: int = 1):
+        """The phone's Exit/Start button: guidance off (on=0) or on to the entrance from the decided place."""
+        state = need().state
+        with state.lock:
+            if not on:
+                out = state.guide.stop()
+            else:
+                # Same as the start_navigation tool: plan from the place decided right now.
+                state.decision = state.window.decide(state.t + time.monotonic() - state._received_at)
+                out = state.guide.start(state.decision.place)
+            return {**out, "active": state.guide.active}
 
     @router.get("/clip/{clip_id}")
     async def clip(clip_id: str, request: Request):

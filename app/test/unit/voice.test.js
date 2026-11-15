@@ -116,3 +116,22 @@ test("a clip that never starts is skipped after STALL_MS and the next one plays"
   assert.equal(p1.calls.at(-1)[0], "play"); // b takes over
   assert.equal(p0.calls.filter((c) => c[0] === "play").length, 1);
 });
+
+test("mute stops the current clip and drops new speech until unmuted", () => {
+  const { players: [p0], createPlayer } = fakePair();
+  const v = createVoicePlayer({ createPlayer, getWsUrl: () => "wss://h/ws/phone" });
+  v.playPath("/api/agent/clip/a");
+  assert.equal(v.isSpeaking(), true);
+  const settled = [];
+  v.setMuted(true);
+  assert.equal(v.isMuted(), true);
+  assert.equal(v.isSpeaking(), false);
+  assert.ok(p0.calls.some((c) => c[0] === "pause"));
+  v.playPath("/api/agent/clip/b");
+  v.speak("Hello", { onSettled: () => settled.push("end") });
+  assert.deepEqual(replaced(p0), ["https://h/api/agent/clip/a"]); // nothing new was loaded
+  assert.deepEqual(settled, ["end"]); // a muted phrase still settles, so the cue speaker moves on
+  v.setMuted(false);
+  v.playPath("/api/agent/clip/c");
+  assert.deepEqual(replaced(p0), ["https://h/api/agent/clip/a", "https://h/api/agent/clip/c"]);
+});

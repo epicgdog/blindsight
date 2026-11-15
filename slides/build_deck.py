@@ -1,4 +1,4 @@
-"""Build the Blindsight pitch deck with python-pptx.
+"""Build the Insight pitch deck with python-pptx.
 
   uv run python3 slides/build_deck.py                 # slides/blindsight.pptx (in git, no imagery)
   uv run python3 slides/build_deck.py --presenting    # slides/blindsight-presenting.pptx (git-ignored)
@@ -31,7 +31,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 ICONS = HERE / "icons"
 ONE = (
-    "Blindsight lets blind and low-vision people tour a property independently, "
+    "Insight lets blind and low-vision people tour a property independently, "
     "guided by voice, using CoStar 3D data."
 )
 TAGLINE = "This is just the first step to a more visible future."
@@ -281,7 +281,7 @@ def s_title(prs, assets):
     s = new_slide(prs, dark=True)
     rings(s, 10.35, 3.75, (1.5, 2.6, 3.7, 4.8), width=1.75)
     icon(s, "volume", 10.35, 3.75, 1.1)
-    text(s, MARGIN, 2.0, 7.6, 1.3, "Blindsight", size=72, bold=True, font=HEAD, color=PAPER,
+    text(s, MARGIN, 2.0, 7.6, 1.3, "Insight", size=72, bold=True, font=HEAD, color=PAPER,
          name="Title")
     text(s, MARGIN, 3.45, 7.0, 1.4, ONE, size=24, color=ON_INK, line=1.15, name="One sentence")
     text(s, MARGIN, 6.45, 12.1, 0.4,
@@ -432,7 +432,7 @@ def s_demo(prs, assets):
     if shot:
         s2 = new_slide(prs, dark=True)
         title(s2, "The judges' view", dark=True)
-        fit_picture(s2, shot, MARGIN, 1.45, 12.1, 5.45, "Blindsight viewer during a walk")
+        fit_picture(s2, shot, MARGIN, 1.45, 12.1, 5.45, "Insight viewer during a walk")
         notes(s2, "Backup: the live viewer. Only in the presenting copy.")
     return s
 
@@ -593,7 +593,7 @@ def s_roadmap(prs, assets):
 
 def s_close(prs, assets):
     s = new_slide(prs, dark=True)
-    title(s, "Why Blindsight wins", dark=True)
+    title(s, "Why Insight wins", dark=True)
     rows = [
         ("users", "Independence for millions", "More than 7 million Americans with vision loss "
          "[3] could walk into a home, an office or a clinic on their own."),
@@ -662,7 +662,7 @@ def s_gap(prs, assets):
     s = new_slide(prs)
     title(s, "Why today's tools fall short",
           sub="Each one solves part of the problem. None of them knows the building.")
-    cols = ["GPS navigation apps", "AI camera apps", "A sighted guide", "Blindsight"]
+    cols = ["GPS navigation apps", "AI camera apps", "A sighted guide", "Insight"]
     rows = [
         ("Works inside a building", ["no", "yes", "yes", "yes"]),
         ("Knows which room you are in", ["no", "some", "yes", "yes"]),
@@ -671,7 +671,7 @@ def s_gap(prs, assets):
     ]
     x0, cw, top, rh = 4.75, 2.0, 1.95, 0.82
     rect(s, x0 + 3 * cw + 0.05, top - 0.05, cw - 0.1, 0.75 + rh * len(rows), AMBER_SOFT,
-         name="Blindsight column")
+         name="Insight column")
     for k, name in enumerate(cols):
         text(s, x0 + k * cw + 0.1, top + 0.05, cw - 0.2, 0.6, name, size=15, bold=True,
              color=TEXT, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, name=f"{name} header")
@@ -687,12 +687,12 @@ def s_gap(prs, assets):
             icon(s, ico, x0 + k * cw + cw / 2, y + rh / 2, 0.46, circle=fill)
     text(s, MARGIN, 6.3, 12.1, 0.4,
          [[("Some", {"bold": True, "color": AMBER}),
-           (": camera apps can read a room sign if the camera finds one. Blindsight today is a "
+           (": camera apps can read a room sign if the camera finds one. Insight today is a "
             "prototype in one building; see “What works today”.", {})]],
          size=13, color=MUTED, name="Legend")
     notes(s, "Part of 0:00 to 0:25.\n\nGPS stops at the front door. Camera apps describe a scene, "
           "but do not know the building. A sighted guide works, but costs your independence. "
-          "Blindsight is the only one that knows the building, because CoStar already scanned it.")
+          "Insight is the only one that knows the building, because CoStar already scanned it.")
     return s
 
 
@@ -712,7 +712,7 @@ def s_usecases(prs, assets):
     title(s, "Use cases")
     text(s, MARGIN, 1.95, 3.9, 1.6, "One pipeline, any scanned space", size=30, bold=True,
          font=HEAD, color=TEXT, line=1.05, name="Statement")
-    text(s, MARGIN, 3.6, 3.7, 1.9, "If a building has a Matterport scan, Blindsight can learn it: "
+    text(s, MARGIN, 3.6, 3.7, 1.9, "If a building has a Matterport scan, Insight can learn it: "
          "process the scans once, then guide anyone through it by voice.", size=16,
          color=MUTED, name="Statement body")
     text(s, MARGIN, 5.75, 3.7, 0.7, "Each new building needs its scans processed and checked "
@@ -779,7 +779,7 @@ def s_future(prs, assets):
 
 
 # Tracks from HackPrinceton's F26 Main Track and F26 Special Tracks documents and MLH's
-# prize list. Each row: what that track's judges ask for, and how Blindsight answers it.
+# prize list. Each row: what that track's judges ask for, and how Insight answers it.
 TRACKS = [
     {"name": "Healthcare", "label": "Main track · Best Healthcare Hack", "icon": "hospital",
      "want": "Improve healthcare delivery, promote wellness or tackle a public health challenge",
@@ -825,7 +825,7 @@ def s_tracks(prs, assets):
           sub="Main track: Best Healthcare Hack, also judged for Best Overall on creativity, "
               "utility, charity and avidity.")
     cols = [(MARGIN, 3.35, "TRACK"), (MARGIN + 3.55, 4.0, "WHAT JUDGES ASK FOR"),
-            (MARGIN + 7.75, 4.2, "HOW BLINDSIGHT ANSWERS")]
+            (MARGIN + 7.75, 4.2, "HOW INSIGHT ANSWERS")]
     top = 1.95
     rh = min(0.92, 4.6 / len(rows))
     rect(s, cols[2][0] - 0.15, top - 0.08, cols[2][1] + 0.3, 0.45 + rh * len(rows) + 0.08,
@@ -894,7 +894,7 @@ SLIDES = (s_title, s_problem, s_why, s_gap, s_insight, s_demo, s_how, s_built, s
 def build(out: Path, assets: dict) -> Presentation:
     prs = Presentation()
     prs.slide_width, prs.slide_height = W, H
-    prs.core_properties.title = "Blindsight"
+    prs.core_properties.title = "Insight"
     prs.core_properties.subject = ONE
     for make in SLIDES:
         make(prs, assets)
@@ -903,7 +903,7 @@ def build(out: Path, assets: dict) -> Presentation:
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Build the Blindsight pitch deck.")
+    ap = argparse.ArgumentParser(description="Build the Insight pitch deck.")
     ap.add_argument("--presenting", action="store_true",
                     help="add local images from data/ (output is git-ignored)")
     ap.add_argument("--data-root", type=Path, default=ROOT, help="folder that holds data/")

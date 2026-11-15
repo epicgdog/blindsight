@@ -274,6 +274,24 @@ def test_talk_endpoint_reports_errors(tmp_path):
     assert c.get("/api/agent/clip/nope").status_code == 404
 
 
+def test_nav_endpoint_turns_guidance_off_and_on_from_the_decided_place(tmp_path):
+    from fastapi import FastAPI
+
+    state = make_state(tmp_path)
+    for t in (0.0, 0.5, 1.0):  # three clear wins: the place is decided as "a"
+        state.on_frame(t, *AT_A)
+    agent = LiveAgent(state, client=SimpleNamespace())
+    app = FastAPI()
+    app.include_router(agent_router(lambda: agent))
+    c = TestClient(app)
+    off = c.post("/api/agent/nav?on=0").json()
+    assert off["ok"] and not off["active"] and not state.guide.active and state.guide.status == {"active": False}
+    on = c.post("/api/agent/nav?on=1").json()
+    assert on["ok"] and on["active"] and state.guide.active
+    assert on["distance_m"] == pytest.approx(9.0)  # planned at once from a: a-b-c-d
+    assert c.post("/api/agent/nav?on=0").json()["active"] is False
+
+
 def test_wav_response_serves_byte_ranges_for_ios():
     from server.voice import wav_response
     data = bytes(range(10))

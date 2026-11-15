@@ -126,7 +126,7 @@ def auth_headers(cfg: dict, creds: list[str] | None) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------- API
-USER_AGENT = "blindsight-part3/1.0"  # Python's default "Python-urllib" agent is often refused by API firewalls
+USER_AGENT = "insight-part3/1.0"  # Python's default "Python-urllib" agent is often refused by API firewalls
 
 
 class ApiError(RuntimeError):

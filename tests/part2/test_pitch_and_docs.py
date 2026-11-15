@@ -16,7 +16,7 @@ def test_pitch_script_under_three_minutes():
 
 def test_pitch_has_one_sentence_first_and_last():
     text = (ROOT / "slides/pitch_script.md").read_text()
-    sentence = "Blindsight lets blind and low-vision people tour a property independently"
+    sentence = "Insight lets blind and low-vision people tour a property independently"
     body = [l for l in text.splitlines() if l.strip() and not l.startswith(("#", "[", ">"))]
     assert sentence in body[0] or sentence in " ".join(body[:2])
     assert sentence in " ".join(body[-2:])

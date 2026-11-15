@@ -1,1 +1,1 @@
-"""Blindsight core server and shared integration contracts."""
+"""Insight core server and shared integration contracts."""

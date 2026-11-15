@@ -1,6 +1,6 @@
-# Blindsight
+# Insight
 
-Blindsight lets blind and low-vision people tour a property independently, guided by voice, using CoStar 3D data.
+Insight lets blind and low-vision people tour a property independently, guided by voice, using CoStar 3D data.
 
 Demo target: Princeton – Rabinowitz Hall, API model `P3S6VUTP3qB` (public viewer `6sd6A5r5EVp`), one scan position.
 
@@ -48,7 +48,7 @@ On the phone: install **Expo Go**, scan the QR that Expo prints, then tap **Allo
 
 | Command | What it does |
 | --- | --- |
-| `uv run python3 app/dev/echo_server.py` | stand-in server on port `8000` (`BLINDSIGHT_PORT` to change) |
+| `uv run python3 app/dev/echo_server.py` | stand-in server on port `8000` (`INSIGHT_PORT` to change) |
 | `scripts/tunnel.sh` | Cloudflare quick tunnel + Expo with the server address baked in |
 | `scripts/tunnel.sh --dry-run` | print the address and QR only; do not start Expo |
 | `uv run pytest` | Python integration tests (boots the stand-in server, drives node and Chrome) |
@@ -61,11 +61,11 @@ On the phone: install **Expo Go**, scan the QR that Expo prints, then tap **Allo
 
 | Variable | Used by | Default |
 | --- | --- | --- |
-| `BLINDSIGHT_PORT` | echo server, tunnel script | `8000` |
-| `BLINDSIGHT_TUNNEL_TIMEOUT` | tunnel script: seconds to wait for the tunnel URL | `30` |
-| `BLINDSIGHT_EXPO_ARGS` | tunnel script: extra args for `expo start` (e.g. `--tunnel`) | empty |
-| `BLINDSIGHT_NO_EXPO` | tunnel script: skip starting Expo | unset |
-| `BLINDSIGHT_DATA` | echo server: where captured frames go | `./data` |
+| `INSIGHT_PORT` | echo server, tunnel script | `8000` |
+| `INSIGHT_TUNNEL_TIMEOUT` | tunnel script: seconds to wait for the tunnel URL | `30` |
+| `INSIGHT_EXPO_ARGS` | tunnel script: extra args for `expo start` (e.g. `--tunnel`) | empty |
+| `INSIGHT_NO_EXPO` | tunnel script: skip starting Expo | unset |
+| `INSIGHT_DATA` | echo server: where captured frames go | `./data` |
 | `EXPO_PUBLIC_SERVER_URL` | phone app: pre-filled server address (set by `tunnel.sh`) | empty |
 | `CHROME` | video renderer: path to Chrome | macOS default install path |
 
@@ -116,7 +116,7 @@ The stand-in server implements all of these with canned data. Part 1's server im
 Expo Go only, no dev build. Uses `expo-camera`, `expo-speech`, `expo-location` (compass heading), `expo-keep-awake` and `expo-screen-orientation`.
 
 - **Capture loop** (`src/loop.js`): sequential. It awaits a low-quality (0.3), EXIF-free, unprocessed capture, then sends, and never starts a capture before the previous send returns. Capture time is logged, with a warning above 250 ms.
-- **Speech** (`src/speech.js`): a cue with `interrupt: true` stops current speech and speaks. Otherwise a cue is spoken only if the phone is idle, and dropped, never queued. Cues are deduplicated by `id`. At startup it says "Blindsight ready" as a volume check.
+- **Speech** (`src/speech.js`): a cue with `interrupt: true` stops current speech and speaks. Otherwise a cue is spoken only if the phone is idle, and dropped, never queued. Cues are deduplicated by `id`. At startup it says "Insight ready" as a volume check.
 - **Reconnect** (`src/client.js`, `src/reconnect.js`): exponential backoff from 0.5 s up to 8 s. It speaks "Connection lost" once on disconnect and "Reconnected" on recovery.
 - **Address** (`src/address.js`): accepts `https://`, `http://`, `wss://`, `ws://` or a bare `host:port` and normalizes to a `/ws/phone` WebSocket URL. The value is persisted on the phone.
 - **Layout**: portrait lock, keep-awake, server address field, Start/Stop, a status line (connected, state, fps) and a small camera preview.
@@ -138,7 +138,7 @@ Panels: live frame with detection boxes, a big `LOCKED` / `UNCERTAIN` / `LOST` b
 3. Prints `EXPO_PUBLIC_SERVER_URL=wss://<host>/ws/phone` and a QR code, then starts Expo with that value baked in, so the app opens with the address filled in.
 4. If the tunnel fails, falls back to the LAN IP (`ws://<ip>:8000/ws/phone`) and says so.
 
-Metro itself is served over the LAN. If venue Wi-Fi isolates clients, run `BLINDSIGHT_EXPO_ARGS=--tunnel scripts/tunnel.sh`. If iOS refuses `ws://`, use ngrok or Tailscale with `wss://`.
+Metro itself is served over the LAN. If venue Wi-Fi isolates clients, run `INSIGHT_EXPO_ARGS=--tunnel scripts/tunnel.sh`. If iOS refuses `ws://`, use ngrok or Tailscale with `wss://`.
 
 ## Backup video
 
@@ -200,7 +200,7 @@ Evaluation scripts (simulated data unless noted): `tools/eval_pitch_gate.py`, `t
 
 ## Troubleshooting
 
-- **Phone cannot connect:** try the tunnel URL, then the LAN URL, then `BLINDSIGHT_EXPO_ARGS=--tunnel`.
-- **No sound:** check the phone is not on silent, raise the volume, and listen for "Blindsight ready".
+- **Phone cannot connect:** try the tunnel URL, then the LAN URL, then `INSIGHT_EXPO_ARGS=--tunnel`.
+- **No sound:** check the phone is not on silent, raise the volume, and listen for "Insight ready".
 - **Capture slower than 250 ms:** lower the capture quality and size in `app/App.js`; if still slow, move to `react-native-vision-camera` with a dev build.
 - **Viewer shows nothing:** confirm the phone is streaming; the viewer only updates while frames arrive.

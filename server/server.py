@@ -46,7 +46,7 @@ from server.record import SessionRecorder
 from server.spatial import spatial_router
 from server.voice import GeminiVoice, voice_router
 
-log = logging.getLogger("blindsight")
+log = logging.getLogger("insight")
 
 
 def decode_image(packet: FramePacket, settings: Settings) -> tuple[np.ndarray, bytes]:
@@ -502,7 +502,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app):
-        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="blindsight-inference")
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="insight-inference")
         try:
             actual_detector = detector
             if actual_detector is None:
@@ -540,7 +540,7 @@ def create_app(
         finally:
             executor.shutdown(wait=True, cancel_futures=True)
 
-    app = FastAPI(title="Blindsight", lifespan=lifespan)
+    app = FastAPI(title="Insight", lifespan=lifespan)
     app.include_router(navigation_router(settings.data_dir))
     app.include_router(
         agent_router(lambda: getattr(getattr(app.state, "runtime", None), "agent", None))
@@ -556,7 +556,7 @@ def create_app(
         if path.is_file():
             return FileResponse(path)
         return HTMLResponse(
-            "<h1>Blindsight core server is ready</h1>"
+            "<h1>Insight core server is ready</h1>"
             "<p>The Part 2 viewer has not been installed.</p>"
             '<p><a href="/metrics">Metrics</a> · <a href="/docs">API</a></p>'
         )

@@ -20,7 +20,7 @@ except ImportError:  # imported by localize.py with server/ on sys.path
     from geometry import movable_boxes_px  # type: ignore[no-redef]
     from matchviz import view_rect_polygon  # type: ignore[no-redef]
 
-log = logging.getLogger("blindsight")
+log = logging.getLogger("insight")
 CACHE_VERSION = 1
 
 

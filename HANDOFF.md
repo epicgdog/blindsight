@@ -43,7 +43,7 @@ The phone has no on-device speech. One **Gemini Live** session per phone connect
    `/api/agent/clip/<id>` and plays segments back to back (`app/src/voice.js`). The first segment of an
    answer or an urgent warning interrupts; the rest queue. A clip that has not started after 6 s is
    skipped.
-5. **Fixed app phrases** ("Blindsight ready", error lines) are Gemini TTS
+5. **Fixed app phrases** ("Insight ready", error lines) are Gemini TTS
    (`gemini-2.5-flash-preview-tts`, `/api/voice?text=`, cached in `data/voice_cache/`).
 
 Supporting pieces:

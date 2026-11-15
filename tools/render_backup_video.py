@@ -102,14 +102,14 @@ def main():
     if not os.path.exists(CHROME) or not shutil.which("ffmpeg"):
         sys.exit("need headless Chrome (set CHROME) and ffmpeg")
 
-    procs, tmp = [], Path(tempfile.mkdtemp(prefix="blindsight-video-"))
+    procs, tmp = [], Path(tempfile.mkdtemp(prefix="insight-video-"))
     try:
         if a.server:
             http_base = a.server.rstrip("/")
         else:
             port = free_port()
             procs.append(subprocess.Popen([sys.executable, str(ROOT / "app/dev/echo_server.py")], cwd=ROOT,
-                                          env={**os.environ, "BLINDSIGHT_PORT": str(port), "BLINDSIGHT_DATA": str(tmp / "data")},
+                                          env={**os.environ, "INSIGHT_PORT": str(port), "INSIGHT_DATA": str(tmp / "data")},
                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
             http_base = f"http://127.0.0.1:{port}"
             for _ in range(75):

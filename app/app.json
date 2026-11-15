@@ -1,19 +1,20 @@
 {
   "expo": {
-    "name": "Blindsight",
+    "name": "Insight",
     "slug": "blindsight",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "ios": {
-      "bundleIdentifier": "org.blindsight.navigation",
+      "bundleIdentifier": "com.epicgdog.insight",
+      "appleTeamId": "BXZYZKW9WG",
       "supportsTablet": false,
       "infoPlist": {
-        "NSMotionUsageDescription": "Blindsight counts your steps to calibrate walking distance.",
+        "NSMotionUsageDescription": "Insight counts your steps to calibrate walking distance.",
         "NSSpeechRecognitionUsageDescription": "Understand spoken navigation requests.",
-        "NSCameraUsageDescription": "Blindsight streams the camera to your laptop to detect objects and locate you.",
-        "NSLocationWhenInUseUsageDescription": "Blindsight reads the compass heading.",
-        "NSMicrophoneUsageDescription": "Hold to talk: Blindsight sends your voice question to the guide."
+        "NSCameraUsageDescription": "Insight streams the camera to your laptop to detect objects and locate you.",
+        "NSLocationWhenInUseUsageDescription": "Insight reads the compass heading.",
+        "NSMicrophoneUsageDescription": "Hold to talk: Insight sends your voice question to the guide."
       }
     },
     "plugins": [

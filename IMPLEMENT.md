@@ -132,7 +132,7 @@ Acceptance: the highlighted dot follows the ranked place in the viewer on the si
 
 ## Task 5: loose ends from earlier
 
-- Phone app: send `POST /api/speech` after "Blindsight ready" and for each spoken cue with the capture to
+- Phone app: send `POST /api/speech` after "Insight ready" and for each spoken cue with the capture to
   speech-start time (see `NOTES-part1.md`). This makes `make self-check` pass and fills the latency metric.
 - Viewer: show a missing `yaw_deg` as unknown, not `0 deg`. Show 409 warm-up and capture errors.
 - Ranking order: sort by verified inliers first, then retrieval similarity (retrieval alone is noisy).

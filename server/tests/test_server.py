@@ -281,7 +281,7 @@ def test_oversized_frame_is_logged_with_its_dimensions(settings, caplog):
     buffer = io.BytesIO()
     Image.new("RGB", (60, 80), (1, 2, 3)).save(buffer, format="JPEG")
     packet = decode_frame(encode_frame(FrameHeader(1, 1.0, None, 60, 80), buffer.getvalue()))
-    with caplog.at_level(logging.WARNING, logger="blindsight"):
+    with caplog.at_level(logging.WARNING, logger="insight"):
         with pytest.raises(ProtocolError):
             decode_image(packet, small)
     assert any("60x80" in r.getMessage() and "1000" in r.getMessage() for r in caplog.records)

@@ -20,7 +20,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 
-log = logging.getLogger("blindsight.voice")
+log = logging.getLogger("insight.voice")
 
 _RANGE = re.compile(r"bytes=(\d*)-(\d*)$")
 
@@ -52,7 +52,7 @@ STYLE = "Say clearly and calmly, at a brisk pace: "
 
 def warm_phrases() -> list[str]:
     """Fixed app phrases (everything else is spoken by the Live agent)."""
-    return ["Blindsight ready", "Microphone not available.", "I can't reach the voice assistant.",
+    return ["Insight ready", "Microphone not available.", "I can't reach the voice assistant.",
             "Sorry, the voice assistant had a problem."]
 
 

@@ -54,11 +54,11 @@ test("announce always interrupts and is not deduped by cue ids", () => {
   assert.deepEqual(f.log.slice(1), [["stop"], ["speak", "Connection lost"]]);
 });
 
-test("startup speaks 'Blindsight ready' and logs that speech played", async () => {
+test("startup speaks 'Insight ready' and logs that speech played", async () => {
   const f = fake(); const logs = [];
   const s = createCueSpeaker(f.api, { log: (m) => logs.push(m) });
   await s.startupCheck();
-  assert.deepEqual(f.log.find((e) => e[0] === "speak"), ["speak", "Blindsight ready"]);
+  assert.deepEqual(f.log.find((e) => e[0] === "speak"), ["speak", "Insight ready"]);
   assert.ok(logs.some((m) => /speech played/i.test(m)));
 });
 
@@ -80,6 +80,6 @@ test("the startup check is marked so it can be acknowledged separately", async (
   const seen = [];
   const s = createCueSpeaker({ speak: (t, meta) => seen.push([t, meta]), stop() {}, isSpeaking: () => false });
   await s.startupCheck();
-  assert.equal(seen[0][0], "Blindsight ready");
+  assert.equal(seen[0][0], "Insight ready");
   assert.equal(seen[0][1].startup, true);
 });

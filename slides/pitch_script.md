@@ -1,9 +1,9 @@
-# Blindsight pitch script (target under 3:00 at 150 words per minute)
+# Insight pitch script (target under 3:00 at 150 words per minute)
 
 > Stage notes and headings are not counted. Say only measured or sourced numbers: counts from the scan itself, and the public statistics listed with sources in NOTES-part2.md. Slide numbers refer to slides/blindsight.pptx. Slides 8 (What works today) and 12 (Built for our tracks) are for questions and track judges; click past them in the timed pitch.
 
 ## 0:00 to 0:25 Problem (slides 1 to 4)
-Blindsight lets blind and low-vision people tour a property independently, guided by voice, using CoStar 3D data.
+Insight lets blind and low-vision people tour a property independently, guided by voice, using CoStar 3D data.
 
 43 million people are blind worldwide, and more than 7 million Americans have vision loss that glasses cannot fix. If you cannot see, you cannot browse listings. GPS stops at the front door, and camera apps describe a scene without knowing the building. So someone has to come with you.
 
@@ -39,12 +39,12 @@ Next, we test with blind users and on real phones, then add room to room routes 
 ## 2:35 to 3:00 Why it wins (slide 13)
 For people with vision loss, this means walking into a home, an office or a clinic on their own. For CoStar, it is a new audience on Homes.com, Apartments.com and LoopNet, and a feature competitors cannot copy without this data.
 
-Blindsight lets blind and low-vision people tour a property independently, guided by voice, using CoStar 3D data.
+Insight lets blind and low-vision people tour a property independently, guided by voice, using CoStar 3D data.
 
 This is just the first step to a more visible future.
 
 > Track judges: swap in one line before the closing sentence.
-> Healthcare (main track): "Vision loss is a public health challenge for more than 7 million Americans. Blindsight turns the buildings they need, clinics and hospitals included, into places they can walk into alone."
+> Healthcare (main track): "Vision loss is a public health challenge for more than 7 million Americans. Insight turns the buildings they need, clinics and hospitals included, into places they can walk into alone."
 > Amazon: "It reasons and acts for a real user every day: where am I, what is around me, take me to the door, all by voice and vision."
 > Gemini (MLH): "Gemini hears the question as audio, and it is told to answer from tools that read where the phone is and what it sees, never to guess."
 > CoStar: "It runs on your Matterport scans, plans and acts through a voice agent, and understands space from the camera. Next it adds Vexcel imagery for the way to the door."

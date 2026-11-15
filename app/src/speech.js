@@ -21,8 +21,8 @@ export function createCueSpeaker({ speak, stop, isSpeaking }, { log = () => {}, 
       speak(text);
     },
     async startupCheck() {
-      speak("Blindsight ready", { startup: true });
-      log("speech played: Blindsight ready (volume check)");
+      speak("Insight ready", { startup: true });
+      log("speech played: Insight ready (volume check)");
     },
     seenCount: () => seen.size,
   };

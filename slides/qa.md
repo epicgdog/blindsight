@@ -4,7 +4,7 @@ Rule: quote a number only with where it came from, and say "simulated" when it i
 
 ## Product
 
-- **Why not Be My Eyes or Seeing AI?** They describe what the camera sees. Blindsight knows the building from CoStar data: which scan point you are at, which way you face, what is around, and the route to the entrance, before a person ever has to help.
+- **Why not Be My Eyes or Seeing AI?** They describe what the camera sees. Insight knows the building from CoStar data: which scan point you are at, which way you face, what is around, and the route to the entrance, before a person ever has to help.
 - **Who is it for?** Blind and low-vision people touring a property on their own: buyers, renters, or anyone visiting an unfamiliar building that already has a 3D tour.
 - **Tested with blind users?** Not yet. It is our first priority, and the cues follow established clock-face direction conventions. Do not claim more.
 - **Is it safe to walk with?** It is an aid next to a cane or guide dog, not a replacement. The entrance route is demo guidance on the scan graph, not verified-safe navigation (server/entrance_nav.py). Verified routes need a surveyed map (NAVIGATION.md).

@@ -66,9 +66,9 @@ def test_whitespace_is_normalized_so_it_shares_one_cache_entry(tmp_path):
 
 def test_the_disk_cache_survives_a_new_instance(tmp_path):
     first = Synth()
-    make(tmp_path, first).wav("Blindsight ready")
+    make(tmp_path, first).wav("Insight ready")
     second = Synth()
-    assert make(tmp_path, second).wav("Blindsight ready") == WAV
+    assert make(tmp_path, second).wav("Insight ready") == WAV
     assert second.calls == []
 
 

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Start a Cloudflare quick tunnel to the Blindsight server and launch Expo with the
+# Start a Cloudflare quick tunnel to the Insight server and launch Expo with the
 # server address pre-filled. Falls back to the LAN IP if the tunnel fails.
 #   scripts/tunnel.sh            # tunnel + expo (scan the QR with Expo Go)
 #   scripts/tunnel.sh --dry-run  # print address + QR only, do not start expo
-# Env: BLINDSIGHT_PORT (8000), BLINDSIGHT_TUNNEL_TIMEOUT (30 s), BLINDSIGHT_EXPO_ARGS, BLINDSIGHT_NO_EXPO
+# Env: INSIGHT_PORT (8000), INSIGHT_TUNNEL_TIMEOUT (30 s), INSIGHT_EXPO_ARGS, INSIGHT_NO_EXPO
 set -u
-PORT="${BLINDSIGHT_PORT:-8000}"
-TIMEOUT="${BLINDSIGHT_TUNNEL_TIMEOUT:-30}"
+PORT="${INSIGHT_PORT:-8000}"
+TIMEOUT="${INSIGHT_TUNNEL_TIMEOUT:-30}"
 DRY=0; [[ "${1:-}" == "--dry-run" ]] && DRY=1
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-LOG="$(mktemp -t blindsight-tunnel)"
+LOG="$(mktemp -t insight-tunnel)"
 CF_PID=""
 cleanup() { [[ -n "$CF_PID" ]] && kill "$CF_PID" 2>/dev/null; rm -f "$LOG"; }
 trap cleanup EXIT INT TERM
@@ -48,5 +48,5 @@ else
   echo "(QR unavailable; run make setup)" >&2
 fi
 
-if [[ $DRY -eq 1 || -n "${BLINDSIGHT_NO_EXPO:-}" ]]; then exit 0; fi
-cd "$ROOT/app" && EXPO_PUBLIC_SERVER_URL="$URL" npx expo start ${BLINDSIGHT_EXPO_ARGS:-}
+if [[ $DRY -eq 1 || -n "${INSIGHT_NO_EXPO:-}" ]]; then exit 0; fi
+cd "$ROOT/app" && EXPO_PUBLIC_SERVER_URL="$URL" npx expo start ${INSIGHT_EXPO_ARGS:-}

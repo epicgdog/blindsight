@@ -22,5 +22,5 @@ def test_node_unit_suite():
 
 
 def test_phone_pipeline_against_echo_server(server):
-    r = run_node("--test", "app/test/integration/*.test.js", env={"BLINDSIGHT_WS": server["ws"]})
+    r = run_node("--test", "app/test/integration/*.test.js", env={"INSIGHT_WS": server["ws"]})
     assert r.returncode == 0, r.stdout + r.stderr

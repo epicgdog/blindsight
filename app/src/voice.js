@@ -50,6 +50,7 @@ export function createVoicePlayer({ createPlayer, getWsUrl, log = () => {}, now 
   let current = null; // { uri, slot, onStart, onSettled, started, loaded, t0, timer }
   let pre = null; // { slot, entry, loaded } the next clip, loading in the idle player
   let speaking = false;
+  let muted = false; // the phone's mute button: nothing plays until it is turned off again
   const queue = []; // agent clips waiting for the current one to finish: { uri, opts }
   let playEntry = null;
 
@@ -146,8 +147,15 @@ export function createVoicePlayer({ createPlayer, getWsUrl, log = () => {}, now 
     dropPreload();
   };
 
+  const stop = () => {
+    clearQueue("stop clears queue");
+    if (current) { try { players[current.slot].pause(); } catch { /* nothing playing */ } }
+    finish("stopped");
+  };
+
   return {
     speak(text, opts = {}) {
+      if (muted) { log("muted, not spoken", { text }); opts.onSettled?.(); return; }
       const uri = voiceUrl(getWsUrl(), text);
       if (!uri) { log("no server url, not spoken", { text }); opts.onSettled?.(); return; }
       clearQueue("speak clears queue");
@@ -155,6 +163,7 @@ export function createVoicePlayer({ createPlayer, getWsUrl, log = () => {}, now 
     },
     // An agent clip by server path. Urgent clips cut in; others wait their turn (max 40 queued).
     playPath(path, { interrupt = false, ...opts } = {}) {
+      if (muted) { log("muted, clip dropped", { path }); return; }
       const base = serverBase(getWsUrl());
       if (!base || !path) { log("no server url, clip dropped", { path }); return; }
       const entry = { uri: base + path, opts };
@@ -168,11 +177,14 @@ export function createVoicePlayer({ createPlayer, getWsUrl, log = () => {}, now 
       log("queued", { clip: shortUri(entry.uri), queue: queue.length });
       preloadNext();
     },
-    stop() {
-      clearQueue("stop clears queue");
-      if (current) { try { players[current.slot].pause(); } catch { /* nothing playing */ } }
-      finish("stopped");
-    },
+    stop,
     isSpeaking: () => speaking,
+    // Mute stops what is playing and drops everything that arrives until unmuted.
+    setMuted(on) {
+      muted = !!on;
+      log(muted ? "muted" : "unmuted");
+      if (muted) stop();
+    },
+    isMuted: () => muted,
   };
 }
