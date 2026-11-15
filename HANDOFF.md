@@ -18,7 +18,7 @@ cd app && EXPO_PACKAGER_HOSTNAME=<your-tailscale-ip> EXPO_PUBLIC_SERVER_URL=wss:
 - Key: `GOOGLE_API_KEY` in `.env.local` (read by `server/agent.py:read_env_key`; never printed).
   Verified working at the end of the session (it had run out of prepaid credit earlier: 402).
 - Everything Gemini runs on API version **v1beta** (Live, function calling and TTS fail on v1).
-- `AGENT=0` turns the agent off and brings back the old cue engine (server tests run that way).
+- `AGENT=0` turns the agent off; the server is then silent (the old cue engine was removed). Server tests run that way.
 - Tailscale funnel is public: anyone with the URL can spend Gemini credit through
   `/api/voice` and `/api/agent/talk`. Turn it off after the demo: `tailscale funnel --https=443 off`.
 
@@ -33,7 +33,7 @@ The phone has no on-device speech. One **Gemini Live** session per phone connect
 2. **Server events**: each frame, `AgentState.on_frame` produces events and the server sends them to
    Live as `EVENT:` text. Events are the next guidance instruction, arrival, and a very close obstacle
    (seen 2 frames in a row, once per 6 s per class). The agent decides how to say them. The old
-   `CueEngine` stays silent while the agent is on.
+   cue engine was removed.
 3. **Tools** are answered by code, never the model: `get_location`, `get_surroundings`,
    `start_navigation`, `stop_navigation`, `get_route_status`, `describe_view` (one gemini-2.5-flash
    vision call on the latest frame).

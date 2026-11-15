@@ -155,7 +155,7 @@ def test_only_one_phone_and_fresh_state_on_reconnect(settings, packet):
         for _ in range(2):
             with client.websocket_connect("/ws/phone") as phone:
                 phone.send_bytes(packet())
-                assert phone.receive_json()["cue"]["text"] == "View matches the test lobby."
+                assert phone.receive_json()["cue"] is None
                 with client.websocket_connect("/ws/phone") as other:
                     with pytest.raises(WebSocketDisconnect) as error:
                         other.receive_json()
@@ -173,7 +173,7 @@ def test_record_replay_through_pipeline(settings, packet):
     frames = list(replay_frames(session))
     assert len(frames) == 3 and frames[0][0] == 0
     rows = [json.loads(line) for line in (session / "frames.jsonl").read_text().splitlines()]
-    assert sum(row["result"]["cue"] is not None for row in rows) == 1
+    assert all(row["result"]["cue"] is None for row in rows)
     from server.protocol import encode_frame
 
     with TestClient(
@@ -184,20 +184,17 @@ def test_record_replay_through_pipeline(settings, packet):
             for _, frame in frames:
                 phone.send_bytes(encode_frame(frame.header, frame.jpeg))
                 cues.append(phone.receive_json()["cue"])
-            assert sum(cue is not None for cue in cues) == 1
+            assert len(cues) == 3 and all(cue is None for cue in cues)
 
 
-def test_speech_evidence_requires_real_cue_and_is_deduplicated(settings, packet):
+def test_speech_ack_without_cues(settings, packet):
+    """Startup playback acks still count; cue ids are refused now that no cues are sent."""
     with TestClient(create_app(settings, localizer_factory=VerifiedLocalizer)) as client:
-        assert client.get("/metrics").json()["capture_to_audible_ms"]["p50"] is None
         assert client.post("/api/speech", json={"played": True}).status_code == 200
-        with client.websocket_connect("/ws/phone") as phone:
-            phone.send_bytes(packet())
-            cue = phone.receive_json()["cue"]
-            report = {"cue_id": cue["id"], "played": True, "capture_to_audible_ms": 200}
-            assert client.post("/api/speech", json=report).status_code == 200
-            assert client.post("/api/speech", json=report).status_code == 409
-            assert client.get("/metrics").json()["capture_to_audible_ms"]["p95"] == 200
+        assert client.get("/metrics").json()["speech_acknowledged"] is True
+        report = {"cue_id": "loc-test", "played": True, "capture_to_audible_ms": 200}
+        assert client.post("/api/speech", json=report).status_code == 409
+        assert client.post("/api/speech", json={"played": True, "capture_to_audible_ms": 5}).status_code == 422
 
 
 def test_viewer_assets_and_pano_metadata(settings):
@@ -261,7 +258,7 @@ def test_resettable_localizer_is_reused_and_negatives_added(settings, packet):
         for _ in range(2):
             with client.websocket_connect("/ws/phone") as phone:
                 phone.send_bytes(packet())
-                assert phone.receive_json()["cue"]
+                assert "location" in phone.receive_json()
                 assert client.post("/api/capture/neg").status_code == 200
     assert len(built) == 1 and instance.resets == 2 and instance.negatives == 2
 

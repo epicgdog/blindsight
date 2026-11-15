@@ -7,7 +7,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.agent import AgentState, LiveAgent, agent_router
-from server.cues import CueEngine
 from server.entrance_nav import EntranceGuide, EntranceMap, clear_line, clock, mesh_heading_deg, shortest_path
 from server.place_window import PlaceWindow, frame_confidence
 from server.protocol import Location
@@ -100,25 +99,6 @@ def test_real_floor_reaches_the_entrance():
         pytest.skip("no Matterport data")
     m = EntranceMap.load(data, "n0ppizy9u8xcadypd2bawceyc")
     assert m.goal in m.points and not m.unreachable(m.goal)
-
-
-# ---- cues ----------------------------------------------------------------------------
-def loc(state="LOCKED", pano="p", label="Lobby"):
-    return Location(pano, label, state, 0.9, 50, 0.0, 0.9, None)
-
-
-def test_nav_cue_outranks_location_and_hazard_outranks_nav():
-    from server.protocol import Detection
-
-    e = CueEngine(min_gap_s=0.8)
-    cue = e.update([], loc(), 0.0, nav_text="Turn left, to your 9 o'clock.")
-    assert cue.text == "Turn left, to your 9 o'clock." and cue.priority == 1
-    chair = [Detection("chair", 0.9, (0.3, 0.2, 0.9, 0.9))]
-    for t in (2.0, 2.1):
-        e.update(chair, loc(), t)
-    cue = e.update(chair, loc(), 3.0, nav_text="Go straight, about 2 meters.")
-    assert cue.priority == 0 and cue.interrupt
-    assert e.update([], loc(), 4.0).text == "Go straight, about 2 meters."  # held, then spoken
 
 
 # ---- scene memory --------------------------------------------------------------------

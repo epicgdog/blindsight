@@ -37,7 +37,7 @@ if __package__ in {None, ""}:
 
 from server.agent import AgentState, LiveAgent, agent_router
 from server.config import Settings, env_bool
-from server.cues import CueEngine, describe
+from server.cues import describe
 from server.detect import Detector, StubDetector
 from server.minimap import scan_points
 from server.navigation import navigation_router
@@ -189,19 +189,6 @@ class Pipeline:
         self.agent_state = agent_state
         self.detector = detector
         self.localizer = localizer
-        try:
-            landmarks = json.loads((settings.data_dir / "cue_landmarks.json").read_text())
-            if not isinstance(landmarks, list):
-                landmarks = []
-        except (OSError, ValueError):
-            landmarks = []
-        self.cues = CueEngine(
-            settings.hfov_deg,
-            settings.cooldown_s,
-            settings.min_gap_s,
-            detailed=settings.detailed_cues,
-            landmarks=landmarks,
-        )
         self.recorder = SessionRecorder(settings.data_dir / "sessions") if settings.record else None
         self.count = 0
         self.location = None
@@ -240,8 +227,7 @@ class Pipeline:
             }
         if self.agent_state is not None:
             # The Live agent is the only voice: it gets events (guidance, close obstacles) and
-            # decides what to say, so the cue engine stays silent.
-            cue = None
+            # decides what to say.
             try:
                 self.agent_state.on_frame(
                     localized,
@@ -256,8 +242,6 @@ class Pipeline:
                 )
             except Exception:  # guidance must never break the frame pipeline
                 log.exception("Agent state update failed")
-        else:
-            cue = self.cues.update(detections, self.location, localized)
         if warmup and localized < warmup.deadline:
             warmup.attempted += 1
             try:
@@ -283,7 +267,7 @@ class Pipeline:
             "detections": described,
             "location": self.location.to_dict(),
             "localization_debug": getattr(self.localizer, "last_debug", {}),
-            "cue": asdict(cue) if cue else None,
+            "cue": None,  # wire-format field kept; the spoken cue engine was removed
             "mode": {"detector": self.settings.detector, "localizer": self.settings.localizer},
             "match": match,
         }
@@ -381,7 +365,6 @@ class Runtime:
     phone_active: bool = False
     viewers: set = field(default_factory=set)
     warmup: Warmup | None = None
-    cue_ids: dict = field(default_factory=dict)
     agent: object = None
     voice: object = None
 
@@ -398,10 +381,6 @@ class Runtime:
     def publish(self, item: Processed):
         self.latest = item
         self.metrics.add(item.result)
-        cutoff = time.monotonic() - 60
-        self.cue_ids = {key: stamp for key, stamp in self.cue_ids.items() if stamp >= cutoff}
-        if item.result["cue"]:
-            self.cue_ids[item.result["cue"]["id"]] = time.monotonic()
         for queue in self.viewers:
             if queue.full():
                 queue.get_nowait()
@@ -662,10 +641,8 @@ def create_app(
         if not report.played:
             return {"accepted": False}
         if report.cue_id is not None:
-            if report.cue_id not in runtime.cue_ids:
-                raise HTTPException(409, "Cue unknown, already acknowledged or expired")
-            runtime.cue_ids.pop(report.cue_id)
-        elif report.capture_to_audible_ms is not None:
+            raise HTTPException(409, "Cue unknown: the server no longer sends spoken cues")
+        if report.capture_to_audible_ms is not None:
             raise HTTPException(422, "Latency requires a cue_id")
         runtime.metrics.last_speech_at = time.monotonic()
         if report.capture_to_audible_ms is not None:
