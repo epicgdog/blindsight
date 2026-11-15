@@ -36,13 +36,13 @@ const mixAngle = (a, b, k) => { const d = ((b - a + 540) % 360) - 180; return (a
 const pts = (list) => list.map(([u, v]) => `${u},${v}`).join(" ");
 
 // Plan image and everything that only changes with the route: redrawn only when those change.
-const Plan = memo(function Plan({ lv, uri, route, dest, extra }) {
+const Plan = memo(function Plan({ lv, uri, route, dest, extra, viewBox }) {
   const leg = route?.ok ? route.legs.filter((l) => l.level === lv.id) : [];
   const marks = transferMarks(route, lv.id);
   const here = dest && dest.level === lv.id ? dest : null;
   return (
     <Svg pointerEvents="none" style={StyleSheet.absoluteFill} width="100%" height="100%"
-      viewBox={`0 0 ${lv.width} ${lv.height}`} preserveAspectRatio="xMidYMid meet">
+      viewBox={viewBox} preserveAspectRatio="xMidYMid meet">
       {uri ? <SvgImage href={{ uri }} x={0} y={0} width={lv.width} height={lv.height} preserveAspectRatio="xMidYMid meet" /> : null}
       {extra}
       {here ? (
@@ -78,11 +78,13 @@ function PinMark({ x, y, color = "#d93025" }) {
   </>);
 }
 
-export default function VenueMap({ uri, lv, route, dest, you, headingDeg, insetTop, insetBottom, onTapMap,
-  entrancePath, pin, pinDraft }) {
+// compact: { width, height, spanPx } draws a small map (the minimap on the camera screen),
+// zoomed to spanPx plan pixels across, centred on you (else the route start, else the room).
+export default function VenueMap({ uri, lv, route, dest, you, headingDeg, insetTop = 0, insetBottom = 0, onTapMap,
+  entrancePath, pin, pinDraft, compact }) {
   const { height: winH } = useWindowDimensions();
   const [box, setBox] = useState(null);
-  const areaH = Math.max(120, winH - insetTop - insetBottom); // explicit height: layout-derived ones came out 0
+  const areaH = compact ? compact.height : Math.max(120, winH - insetTop - insetBottom); // explicit height: layout-derived ones came out 0
   const align = lv?.align;
   const youPx = you && lv && you.level === lv.id ? you.px : null;
   const dot = useLerp(youPx, mixPoint);
@@ -109,7 +111,9 @@ export default function VenueMap({ uri, lv, route, dest, you, headingDeg, insetT
     </G>
     );
   }, [ground, align, entrancePath, pin, pinDraft]);
-  if (!lv) return <View style={s.root}><Text style={s.note}>Loading venue map…</Text></View>;
+  if (!lv) return <View style={compact ? [s.compact, { width: compact.width, height: compact.height }] : s.root}><Text style={s.note}>Loading map…</Text></View>;
+  const viewBox = compact ? compactView(lv, compact, dot ?? (route?.ok && route.legs[0].level === lv.id ? route.legs[0].px[0] : null)
+    ?? (dest?.level === lv.id ? dest.door_px : null)) : `0 0 ${lv.width} ${lv.height}`;
 
   let arrow = null;
   if (dot && facing != null) {
@@ -121,16 +125,16 @@ export default function VenueMap({ uri, lv, route, dest, you, headingDeg, insetT
   }
 
   return (
-    <View style={s.root}>
-      <Pressable style={[s.area, { top: insetTop, height: areaH }]} onLayout={(e) => setBox(e.nativeEvent.layout)}
+    <View style={compact ? [s.compact, { width: compact.width, height: compact.height }] : s.root}>
+      <Pressable style={[s.area, { top: compact ? 0 : insetTop, height: areaH }]} onLayout={(e) => setBox(e.nativeEvent.layout)}
         disabled={!onTapMap} accessible={false} onPress={(e) => {
           if (!onTapMap || !box || !align) return;
           const px = touchToPx(box, lv.width, lv.height, e.nativeEvent.locationX, e.nativeEvent.locationY);
           if (px) { const [x, y] = pxToMap(align, px[0], px[1]); onTapMap({ x, y, level: lv.id }); }
         }}>
-        <Plan lv={lv} uri={uri} route={route} dest={dest} extra={extra} />
+        <Plan lv={lv} uri={uri} route={route} dest={dest} extra={extra} viewBox={viewBox} />
         <Svg pointerEvents="none" style={StyleSheet.absoluteFill} width="100%" height="100%"
-          viewBox={`0 0 ${lv.width} ${lv.height}`} preserveAspectRatio="xMidYMid meet">
+          viewBox={viewBox} preserveAspectRatio="xMidYMid meet">
           {arrow ? <Line x1={dot[0]} y1={dot[1]} x2={arrow.tip[0]} y2={arrow.tip[1]} stroke="#1a73e8" strokeWidth={4} /> : null}
           {arrow ? <Polygon points={arrow.head} fill="#1a73e8" /> : null}
           {dot ? <Circle cx={dot[0]} cy={dot[1]} r={8} fill="#1a73e8" stroke="#fff" strokeWidth={3} /> : null}
@@ -140,7 +144,17 @@ export default function VenueMap({ uri, lv, route, dest, you, headingDeg, insetT
   );
 }
 
+// viewBox of a compact map: spanPx wide around the centre, snapped to a 12 px grid so the plan
+// image is not redrawn on every small move of the dot.
+export function compactView(lv, compact, centre) {
+  const w = compact.spanPx, h = (compact.spanPx * compact.height) / compact.width;
+  const q = (v) => Math.round(v / 12) * 12;
+  const [cx, cy] = centre ? [q(centre[0]), q(centre[1])] : [lv.width / 2, lv.height / 2];
+  return `${(cx - w / 2).toFixed(0)} ${(cy - h / 2).toFixed(0)} ${w.toFixed(0)} ${h.toFixed(0)}`;
+}
+
 const s = StyleSheet.create({
+  compact: { backgroundColor: "#ffffff", overflow: "hidden", alignItems: "center", justifyContent: "center" },
   root: { ...StyleSheet.absoluteFillObject, backgroundColor: "#ffffff", alignItems: "center", justifyContent: "center" },
   area: { position: "absolute", left: 0, right: 0 },
   note: { color: "#5f6368", fontSize: 16 },

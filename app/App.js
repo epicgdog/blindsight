@@ -82,6 +82,8 @@ function LegacyApp() {
   const [levelPick, setLevelPick] = useState(null); // level chosen with the tabs; null follows you
   const [stepsOpen, setStepsOpen] = useState(false);
   const [markNote, setMarkNote] = useState(""); // result of the last "Mark here"
+  const [screen, setScreen] = useState("map"); // map (search and plan) | nav (camera with the path)
+  const [confirm, setConfirm] = useState(null); // { room, route?, loading? }: picked, before Navigate
 
   useEffect(() => {
     (async () => {
@@ -383,6 +385,31 @@ function LegacyApp() {
         body: JSON.stringify({ to: room.id }) });
     } catch (e) { logApp("venue destination failed", { error: e?.message }); }
   }, []);
+  // A search result opens a confirm card with the route preview; Navigate starts it and opens
+  // the camera screen (starting the camera stream if it is not running yet).
+  const pickRoom = useCallback(async (room) => {
+    setVenueQ(""); setVenueHits(null); setPinDraft(null); setPinMode(false);
+    setConfirm({ room, loading: true });
+    try {
+      const rt = await (await fetch(venueRouteUrl(normalizeServerUrl(addressRef.current), room.id))).json();
+      setConfirm((c) => (c?.room?.id === room.id ? { room, route: rt?.ok ? rt : null } : c));
+    } catch (e) {
+      setConfirm((c) => (c?.room?.id === room.id ? { room, route: null } : c));
+      logApp("route preview failed", { error: e?.message });
+    }
+  }, []);
+  const openCamera = useCallback(() => {
+    setScreen("nav");
+    if (!runningRef.current) start().catch((e) => logApp("start failed", { error: e?.message }));
+  }, [start]);
+  const navigate = useCallback(async () => {
+    const room = confirm?.room;
+    setConfirm(null);
+    if (!room) return;
+    openCamera();
+    await goToRoom(room);
+  }, [confirm, goToRoom, openCamera]);
+
   // "Mark here": a restroom or water fountain where you stand (needs a position fix).
   const markHere = useCallback(async (kind) => {
     const url = venueMarkUrl(normalizeServerUrl(addressRef.current));
@@ -397,7 +424,7 @@ function LegacyApp() {
   }, []);
 
   const endRoom = useCallback(async () => {
-    setLocalRoute(null); setLevelPick(null); setStepsOpen(false);
+    setLocalRoute(null); setLevelPick(null); setStepsOpen(false); setScreen("map");
     const url = venueDestUrl(normalizeServerUrl(addressRef.current));
     if (!url) return;
     setResult((r) => (r?.agent?.venue ? { ...r, agent: { ...r.agent, venue: { ...r.agent.venue, dest: null, route: null } } } : r));
@@ -498,6 +525,7 @@ function LegacyApp() {
   const vDest = vRoute?.ok ? vRoute.to : liveVenue?.dest ?? null;
   const level = shownLevel({ override: levelPick, you: liveVenue?.you, route: vRoute });
   const lv = venueData?.levels?.find((l) => l.id === level) ?? null;
+  const miniLv = venueData?.levels?.find((l) => l.id === shownLevel({ override: null, you: liveVenue?.you, route: vRoute })) ?? null;
   const vb = venueBanner(vRoute);
   const b = !running ? { title: "Not started", meters: "", arrow: null, tone: "off" }
     : vb && status.connected ? vb : banner({ connected: status.connected, nav, position });
@@ -517,7 +545,11 @@ function LegacyApp() {
   return (
     <View style={[s.root, { height: winH, width: winW }]}>
       <StatusBar barStyle="dark-content" />
-      {venueData ? (
+      {screen === "nav" ? (
+        <View style={[StyleSheet.absoluteFill, s.camBack]}>
+          <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" pictureSize={PICTURE_SIZE} />
+        </View>
+      ) : venueData ? (
         <VenueMap lv={lv} uri={imageUrl(normalizeServerUrl(address), lv?.image_url)} route={vRoute} dest={vDest}
           you={liveVenue?.you} headingDeg={facing?.heading_deg}
           insetTop={TOP + 176} insetBottom={debugOpen ? sheetH + 8 : BOTTOM + BAR_H + 8}
@@ -544,17 +576,17 @@ function LegacyApp() {
           </Pressable>
         </View>
         {talkNote ? <Text style={[s.talkNote, talkState === "listening" && s.talkNoteOn]}>{talkNote}</Text> : null}
-        {venueData ? (
+        {venueData && screen === "map" ? (
           <View style={s.search}>
             <TextInput style={s.searchInput} value={venueQ} onChangeText={setVenueQ} placeholder="Search rooms: judges, A97, food…"
               placeholderTextColor="#80868b" autoCorrect={false} autoCapitalize="none" returnKeyType="search" clearButtonMode="while-editing"
               accessibilityLabel="Search rooms by number or purpose" />
           </View>
         ) : null}
-        {venueHits ? (
+        {venueHits && screen === "map" ? (
           <View style={s.hits}>
             {venueHits.length ? venueHits.map((h) => (
-              <Pressable key={h.id} style={s.hit} onPress={() => goToRoom(h)} accessibilityRole="button"
+              <Pressable key={h.id} style={s.hit} onPress={() => pickRoom(h)} accessibilityRole="button"
                 accessibilityLabel={`${h.name}, ${h.level_name}${h.distance_m != null ? `, ${Math.round(h.distance_m)} meters` : ""}`}>
                 <Text style={s.hitTitle} numberOfLines={1}>{h.name}</Text>
                 <Text style={s.hitSub} numberOfLines={1}>
@@ -566,7 +598,21 @@ function LegacyApp() {
         ) : null}
       </View>
 
-      {venueData ? (
+      {screen === "nav" && !(liveVenue?.you && vRoute?.ok && !vRoute.start_assumed) ? (
+        <View style={s.navNote} pointerEvents="none">
+          <Text style={s.navNoteText}>{running ? "Hold the phone up and look around slowly…" : "Starting the camera…"}</Text>
+        </View>
+      ) : null}
+      {screen === "nav" && venueData ? (
+        <Pressable style={[s.mini, { bottom: BOTTOM + BAR_H + 12 }]} onPress={() => setScreen("map")}
+          accessibilityRole="button" accessibilityLabel="Show the full map">
+          <VenueMap compact={{ width: MINI, height: MINI, spanPx: 240 }} lv={miniLv}
+            uri={imageUrl(normalizeServerUrl(address), miniLv?.image_url)} route={vRoute} dest={vDest}
+            you={liveVenue?.you} headingDeg={facing?.heading_deg} />
+        </Pressable>
+      ) : null}
+
+      {venueData && screen === "map" ? (
         <View style={s.levels} pointerEvents="box-none">
           {venueData.levels.map((l) => {
             const on = l.id === level, onRoute = vRoute?.ok && vRoute.legs.some((g) => g.level === l.id);
@@ -584,10 +630,10 @@ function LegacyApp() {
       ) : null}
 
       <View style={s.side} pointerEvents="box-none">
-        <Pressable style={s.round} hitSlop={8} onPress={() => setMapPref((p) => (p === "follow" ? "north" : "follow"))}
+        {screen === "map" ? <Pressable style={s.round} hitSlop={8} onPress={() => setMapPref((p) => (p === "follow" ? "north" : "follow"))}
           accessibilityRole="button" accessibilityLabel={mapPref === "follow" ? "Show the whole floor, north up" : "Follow my heading"}>
           <CompassIcon follow={mapPref === "follow"} />
-        </Pressable>
+        </Pressable> : null}
         <Pressable style={[s.round, muted && s.roundOn]} hitSlop={8} onPress={() => setMuted((m) => !m)}
           accessibilityRole="button" accessibilityLabel={muted ? "Unmute voice" : "Mute voice"} accessibilityState={{ selected: muted }}>
           <SpeakerIcon muted={muted} />
@@ -597,9 +643,31 @@ function LegacyApp() {
           <BugIcon />
         </Pressable>
       </View>
-      {accuracy ? <View style={s.chip}><Text style={s.chipText}>{accuracy}</Text></View> : null}
+      {accuracy && screen === "map" ? <View style={s.chip}><Text style={s.chipText}>{accuracy}</Text></View> : null}
 
-      {vRoute?.ok && !pinMode && !pinDraft ? (
+      {screen === "nav" ? null : confirm ? (
+        <View style={s.pinCard}>
+          <Text style={s.pinTitle} numberOfLines={1}>{confirm.room.name}</Text>
+          <Text style={s.pinNote}>
+            {confirm.room.level_name}
+            {confirm.route ? ` · ${distanceText(confirm.route.total_m)} · ${Math.max(1, Math.round(confirm.route.total_m / 60))} min` : confirm.loading ? " · finding the route…" : " · no route"}
+            {confirm.route?.start_assumed ? " from check-in" : ""}
+          </Text>
+          {confirm.route?.transfers?.map((t, i) => (
+            <Text key={i} style={s.pinNote}>{t.kind === "elevator" ? "Elevator" : "Stairs"} to {t.to_level === "A" ? "Level A" : `Level ${t.to_level}`}</Text>
+          ))}
+          {confirm.room.approximate ? <Text style={s.pinNote}>Door position is approximate</Text> : null}
+          <View style={s.pinRow}>
+            <Pressable style={s.pinCancel} onPress={() => setConfirm(null)} accessibilityRole="button">
+              <Text style={s.pinCancelText}>Cancel</Text>
+            </Pressable>
+            <Pressable style={[s.pinStart, !confirm.route && s.disabled]} disabled={!confirm.route} onPress={navigate}
+              accessibilityRole="button" accessibilityLabel={`Navigate to ${confirm.room.name}`}>
+              <Text style={s.pinStartText}>Navigate</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : vRoute?.ok && !pinMode && !pinDraft ? (
         <View style={s.pinCard}>
           <Pressable onPress={() => setStepsOpen((o) => !o)} accessibilityRole="button"
             accessibilityLabel={`${vDest?.name}. ${stepsOpen ? "Hide" : "Show"} all steps`}>
@@ -613,6 +681,11 @@ function LegacyApp() {
               {vRoute.steps.map((st, i) => <Text key={i} style={s.step}>{i + 1}. {st}</Text>)}
             </ScrollView>
           ) : null}
+          <View style={s.pinRow}>
+            <Pressable style={s.pinStart} onPress={openCamera} accessibilityRole="button" accessibilityLabel="Open the camera view">
+              <Text style={s.pinStartText}>Camera</Text>
+            </Pressable>
+          </View>
         </View>
       ) : pinMode ? (
         <View style={s.pinCard} pointerEvents="none">
@@ -680,7 +753,7 @@ function LegacyApp() {
         </View>
         <View style={s.sheetTop}>
           <View style={s.preview}>
-            <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" pictureSize={PICTURE_SIZE} />
+            {screen !== "nav" ? <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" pictureSize={PICTURE_SIZE} /> : null}
             {(result?.detections ?? []).map((d, i) => (
               <View key={i} style={[s.det, boxStyle(d.bbox)]} pointerEvents="none">
                 <Text style={s.detText}>{d.cls} {Math.round(d.conf * 100)}%</Text>
@@ -740,10 +813,17 @@ export default function App() {
 const TOP = Platform.OS === "ios" ? 54 : (StatusBar.currentHeight ?? 24) + 8;
 const BOTTOM = Platform.OS === "ios" ? 30 : 14;
 const BAR_H = 76;
+const MINI = 150; // minimap size on the camera screen
 const shadow = { shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 5 };
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#e8eaed" },
+  camBack: { backgroundColor: "#000" },
+  mini: { position: "absolute", left: 12, width: MINI, height: MINI, borderRadius: 16, overflow: "hidden",
+    borderWidth: 3, borderColor: "#fff", backgroundColor: "#fff", ...shadow },
+  navNote: { position: "absolute", top: TOP + 120, left: 24, right: 24, alignItems: "center" },
+  navNoteText: { backgroundColor: "rgba(32,33,36,0.85)", color: "#fff", fontSize: 17, fontWeight: "600",
+    paddingHorizontal: 16, paddingVertical: 10, borderRadius: 18, overflow: "hidden", textAlign: "center" },
   top: { position: "absolute", top: TOP, left: 10, right: 10 },
   banner: { flexDirection: "row", alignItems: "center", borderRadius: 16, paddingVertical: 12, paddingHorizontal: 14, gap: 12, ...shadow },
   bannerGo: { backgroundColor: "#0d652d" },
