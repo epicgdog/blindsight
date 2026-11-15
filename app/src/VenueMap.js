@@ -2,7 +2,7 @@
 // level, the destination room, stair/elevator marks, and you (when you are on this level).
 // Everything is drawn in the plan's own pixels under one viewBox, so it lines up exactly.
 import React, { memo, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Animated, PanResponder, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import Svg, { Circle, G, Image as SvgImage, Line, Path, Polygon, Polyline, Text as SvgText } from "react-native-svg";
 import { mapToPx, pxToMap, touchToPx, transferMarks } from "./venue";
 
@@ -34,6 +34,60 @@ const mixPoint = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * 
 const mixAngle = (a, b, k) => { const d = ((b - a + 540) % 360) - 180; return (a + d * k + 360) % 360; };
 
 const pts = (list) => list.map(([u, v]) => `${u},${v}`).join(" ");
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const MAX_ZOOM = 6;
+
+// Pinch to zoom and drag to pan, with React Native's own touch system (no native gesture
+// library). The map content gets transform [translate, scale] about the area's centre:
+// screen = C + T + s * (p - C). The pinch midpoint stays over the same spot of the plan.
+function useZoom(boxRef, insetTop) {
+  const z = useRef({ s: 1, x: 0, y: 0, g: null });
+  const aS = useRef(new Animated.Value(1)).current, aX = useRef(new Animated.Value(0)).current;
+  const aY = useRef(new Animated.Value(0)).current;
+  const apply = (sc, x, y) => {
+    const b = boxRef.current;
+    const mx = b ? (b.width * (sc - 1)) / 2 : 0, my = b ? (b.height * (sc - 1)) / 2 : 0;
+    Object.assign(z.current, { s: sc, x: clamp(x, -mx, mx), y: clamp(y, -my, my) });
+    aS.setValue(z.current.s); aX.setValue(z.current.x); aY.setValue(z.current.y);
+  };
+  const touch = (e) => {
+    const t = e.nativeEvent.touches;
+    if (t.length >= 2) {
+      return { n: 2, d: Math.hypot(t[0].pageX - t[1].pageX, t[0].pageY - t[1].pageY),
+        mx: (t[0].pageX + t[1].pageX) / 2, my: (t[0].pageY + t[1].pageY) / 2 - insetTop };
+    }
+    return { n: 1, d: 0, mx: t[0]?.pageX ?? 0, my: (t[0]?.pageY ?? 0) - insetTop };
+  };
+  const grant = (e) => {
+    const b = boxRef.current, t = touch(e), c = z.current;
+    const C = [b ? b.width / 2 : 0, b ? b.height / 2 : 0];
+    // plan point under the fingers, in unzoomed area coordinates
+    c.g = { ...t, s0: c.s, C, p: [C[0] + (t.mx - C[0] - c.x) / c.s, C[1] + (t.my - C[1] - c.y) / c.s] };
+  };
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: (e) => e.nativeEvent.touches.length >= 2,
+    onMoveShouldSetPanResponder: (e, g) => e.nativeEvent.touches.length >= 2
+      || (z.current.s > 1.01 && Math.abs(g.dx) + Math.abs(g.dy) > 8),
+    onPanResponderGrant: grant,
+    onPanResponderMove: (e) => {
+      const g = z.current.g, t = touch(e);
+      if (!g || t.n !== g.n) { grant(e); return; } // a finger added or lifted: start again from here
+      const sc = t.n === 2 && g.d > 10 ? clamp((g.s0 * t.d) / g.d, 1, MAX_ZOOM) : g.s0;
+      apply(sc, t.mx - g.C[0] - sc * (g.p[0] - g.C[0]), t.my - g.C[1] - sc * (g.p[1] - g.C[1]));
+    },
+    onPanResponderRelease: () => { z.current.g = null; },
+    onPanResponderTerminate: () => { z.current.g = null; },
+  })).current;
+  // a touch in the area -> the same point of the unzoomed map
+  const unzoom = (lx, ly) => {
+    const b = boxRef.current, c = z.current;
+    if (!b) return [lx, ly];
+    const C = [b.width / 2, b.height / 2];
+    return [C[0] + (lx - C[0] - c.x) / c.s, C[1] + (ly - C[1] - c.y) / c.s];
+  };
+  const style = { transform: [{ translateX: aX }, { translateY: aY }, { scale: aS }] };
+  return { pan, style, unzoom, reset: () => apply(1, 0, 0) };
+}
 
 // Plan image and everything that only changes with the route: redrawn only when those change.
 const Plan = memo(function Plan({ lv, uri, route, dest, extra, viewBox }) {
@@ -84,6 +138,10 @@ export default function VenueMap({ uri, lv, route, dest, you, headingDeg, insetT
   entrancePath, pin, pinDraft, compact }) {
   const { height: winH } = useWindowDimensions();
   const [box, setBox] = useState(null);
+  const boxRef = useRef(null);
+  boxRef.current = box;
+  const zoom = useZoom(boxRef, insetTop);
+  useEffect(() => { zoom.reset(); }, [lv?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const areaH = compact ? compact.height : Math.max(120, winH - insetTop - insetBottom); // explicit height: layout-derived ones came out 0
   const align = lv?.align;
   const youPx = you && lv && you.level === lv.id ? you.px : null;
@@ -124,37 +182,46 @@ export default function VenueMap({ uri, lv, route, dest, you, headingDeg, insetT
     arrow = { tip, head: [tip, l, r].map((q) => q.map((v) => v.toFixed(1)).join(",")).join(" ") };
   }
 
-  return (
-    <View style={compact ? [s.compact, { width: compact.width, height: compact.height }] : s.root}>
-      <Pressable style={[s.area, { top: compact ? 0 : insetTop, height: areaH }]} onLayout={(e) => setBox(e.nativeEvent.layout)}
-        disabled={!onTapMap} accessible={false} onPress={(e) => {
-          if (!onTapMap || !box || !align) return;
-          const px = touchToPx(box, lv.width, lv.height, e.nativeEvent.locationX, e.nativeEvent.locationY);
-          if (px) { const [x, y] = pxToMap(align, px[0], px[1]); onTapMap({ x, y, level: lv.id }); }
-        }}>
-        <Plan lv={lv} uri={uri} route={route} dest={dest} extra={extra} viewBox={viewBox} />
-        <Svg pointerEvents="none" style={StyleSheet.absoluteFill} width="100%" height="100%"
-          viewBox={viewBox} preserveAspectRatio="xMidYMid meet">
-          {arrow ? <Line x1={dot[0]} y1={dot[1]} x2={arrow.tip[0]} y2={arrow.tip[1]} stroke="#1a73e8" strokeWidth={4} /> : null}
-          {arrow ? <Polygon points={arrow.head} fill="#1a73e8" /> : null}
-          {dot ? <Circle cx={dot[0]} cy={dot[1]} r={8} fill="#1a73e8" stroke="#fff" strokeWidth={3} /> : null}
-        </Svg>
-      </Pressable>
-    </View>
+  const marks = (
+    <Svg pointerEvents="none" style={StyleSheet.absoluteFill} width="100%" height="100%"
+      viewBox={viewBox} preserveAspectRatio="xMidYMid meet">
+      {arrow ? <Line x1={dot[0]} y1={dot[1]} x2={arrow.tip[0]} y2={arrow.tip[1]} stroke="#1a73e8" strokeWidth={4} /> : null}
+      {arrow ? <Polygon points={arrow.head} fill="#1a73e8" /> : null}
+      {dot ? <Circle cx={dot[0]} cy={dot[1]} r={8} fill="#1a73e8" stroke="#fff" strokeWidth={3} /> : null}
+    </Svg>
   );
-}
-
-// viewBox of a compact map: spanPx wide around the centre, snapped to a 12 px grid so the plan
-// image is not redrawn on every small move of the dot.
-export function compactView(lv, compact, centre) {
-  const w = compact.spanPx, h = (compact.spanPx * compact.height) / compact.width;
-  const q = (v) => Math.round(v / 12) * 12;
-  const [cx, cy] = centre ? [q(centre[0]), q(centre[1])] : [lv.width / 2, lv.height / 2];
-  return `${(cx - w / 2).toFixed(0)} ${(cy - h / 2).toFixed(0)} ${w.toFixed(0)} ${h.toFixed(0)}`;
+  return (
+    compact ? (
+      <View style={[s.compact, { width: compact.width, height: compact.height }]}>
+        <View style={[s.area, { top: 0, height: areaH }]} onLayout={(e) => setBox(e.nativeEvent.layout)}>
+          <Plan lv={lv} uri={uri} route={route} dest={dest} extra={extra} viewBox={viewBox} />
+          {marks}
+        </View>
+      </View>
+    ) : (
+      <View style={s.root}>
+        <View style={[s.area, s.clip, { top: insetTop, height: areaH }]} onLayout={(e) => setBox(e.nativeEvent.layout)}
+          {...zoom.pan.panHandlers}>
+          <Pressable style={StyleSheet.absoluteFill} disabled={!onTapMap} accessible={false} onPress={(e) => {
+            if (!onTapMap || !box || !align) return;
+            const [lx, ly] = zoom.unzoom(e.nativeEvent.locationX, e.nativeEvent.locationY);
+            const px = touchToPx(box, lv.width, lv.height, lx, ly);
+            if (px) { const [x, y] = pxToMap(align, px[0], px[1]); onTapMap({ x, y, level: lv.id }); }
+          }}>
+            <Animated.View style={[StyleSheet.absoluteFill, zoom.style]}>
+              <Plan lv={lv} uri={uri} route={route} dest={dest} extra={extra} viewBox={viewBox} />
+              {marks}
+            </Animated.View>
+          </Pressable>
+        </View>
+      </View>
+    )
+  );
 }
 
 const s = StyleSheet.create({
   compact: { backgroundColor: "#ffffff", overflow: "hidden", alignItems: "center", justifyContent: "center" },
+  clip: { overflow: "hidden" },
   root: { ...StyleSheet.absoluteFillObject, backgroundColor: "#ffffff", alignItems: "center", justifyContent: "center" },
   area: { position: "absolute", left: 0, right: 0 },
   note: { color: "#5f6368", fontSize: 16 },

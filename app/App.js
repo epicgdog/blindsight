@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Button, PanResponder, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Animated, Button, Keyboard, PanResponder, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { RecordingPresets, createAudioPlayer, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from "expo-audio";
 import * as ScreenOrientation from "expo-screen-orientation";
@@ -395,6 +395,7 @@ function LegacyApp() {
   // A search result opens a confirm card with the route preview; Navigate starts it and opens
   // the camera screen (starting the camera stream if it is not running yet).
   const pickRoom = useCallback(async (room) => {
+    Keyboard.dismiss();
     setVenueQ(""); setVenueHits(null); setPinDraft(null); setPinMode(false);
     setConfirm({ room, loading: true });
     try {
@@ -580,29 +581,21 @@ function LegacyApp() {
         <View style={[StyleSheet.absoluteFill, s.camBack]}>
           <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" pictureSize={PICTURE_SIZE} />
           <ArOverlay width={winW} height={winH} getPose={getArPose} cam={arCam} />
-          {(result?.detections ?? []).map((d, i) => {
-            const fw = Math.max(winW, winH * 0.75), off = (winW - fw) / 2, [x1, y1, x2, y2] = d.bbox;
-            return (
-              <View key={i} style={[s.det, s.detBig, { left: off + x1 * fw, top: y1 * winH, width: (x2 - x1) * fw, height: (y2 - y1) * winH }]}
-                pointerEvents="none">
-                <Text style={s.detBigText}>{d.cls} {Math.round(d.conf * 100)}%</Text>
-              </View>
-            );
-          })}
         </View>
       ) : venueData ? (
         <VenueMap lv={lv} uri={imageUrl(normalizeServerUrl(address), lv?.image_url)} route={vRoute} dest={vDest}
           you={liveVenue?.you} headingDeg={facing?.heading_deg}
-          insetTop={TOP + 176} insetBottom={debugOpen ? sheetH + 8 : BOTTOM + BAR_H + 8}
+          insetTop={TOP + 64} insetBottom={debugOpen ? sheetH + 8 : BOTTOM + BAR_H + 8}
           entrancePath={path} pin={path?.goal_kind === "pin" ? path.goal : null}
           pinDraft={pinDraft?.ok || pinDraft?.loading ? pinDraft : null} onTapMap={pinMode && status.connected ? onTapMap : null} />
       ) : (
         <FlatMap map={mapData?.map} path={path} position={position} headingDeg={facing?.heading_deg} ranking={frameMatch(result)?.ranking} activeId={result?.agent?.decision?.place} debugDots={debugDots}
-          insetTop={TOP + 120} insetBottom={debugOpen ? sheetH + 8 : BOTTOM + BAR_H + 8}
+          insetTop={TOP + 64} insetBottom={debugOpen ? sheetH + 8 : BOTTOM + BAR_H + 8}
           preview={pinDraft?.ok || pinDraft?.loading ? pinDraft : null} onTapMap={pinMode && status.connected ? onTapMap : null} />
       )}
 
       <View style={s.top} pointerEvents="box-none">
+        {screen === "nav" ? (<>
         <View style={[s.banner, b.tone === "go" || b.tone === "done" ? s.bannerGo : s.bannerWait]}>
           <View style={s.bannerArrow}>
             {b.arrow ? <TurnIcon arrow={b.arrow} size={44} /> : b.tone === "wait" ? <ActivityIndicator color="#fff" /> : null}
@@ -617,6 +610,7 @@ function LegacyApp() {
           </Pressable>
         </View>
         {talkNote ? <Text style={[s.talkNote, talkState === "listening" && s.talkNoteOn]}>{talkNote}</Text> : null}
+        </>) : null}
         {venueData && screen === "map" ? (
           <View style={s.search}>
             <TextInput style={s.searchInput} value={venueQ} onChangeText={setVenueQ} placeholder="Search rooms: judges, A97, food…"
@@ -920,7 +914,7 @@ const s = StyleSheet.create({
   hitTitle: { color: "#202124", fontSize: 16, fontWeight: "600" },
   hitSub: { color: "#5f6368", fontSize: 13, marginTop: 2 },
   hitNone: { color: "#5f6368", fontSize: 15, padding: 14 },
-  levels: { position: "absolute", left: 12, top: TOP + 186, gap: 8 },
+  levels: { position: "absolute", left: 12, top: TOP + 70, gap: 8 },
   levelBtn: { width: 46, minHeight: 46, borderRadius: 12, backgroundColor: "#fff", alignItems: "center", justifyContent: "center",
     paddingVertical: 4, ...shadow },
   levelOn: { backgroundColor: "#1a73e8" },
@@ -960,9 +954,6 @@ const s = StyleSheet.create({
   preview: { width: 96, height: 128, borderRadius: 8, overflow: "hidden", backgroundColor: "#000" },
   det: { position: "absolute", borderWidth: 1.5, borderColor: "#fbbc04" },
   detText: { color: "#fbbc04", fontSize: 8, fontWeight: "700" },
-  detBig: { borderWidth: 3, borderRadius: 6 },
-  detBigText: { color: "#202124", backgroundColor: "#fbbc04", fontSize: 13, fontWeight: "800", alignSelf: "flex-start",
-    paddingHorizontal: 5, paddingVertical: 1 },
   controls: { flex: 1, gap: 8 },
   input: { backgroundColor: "#303134", color: "#fff", padding: 10, borderRadius: 8, fontSize: 15 },
   sheetBody: { flex: 1, marginTop: 8 },
