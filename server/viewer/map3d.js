@@ -3,8 +3,8 @@
 // North (larger y) therefore points away from the camera at the default azimuth, like the 2D map.
 import * as THREE from "/viewer/vendor/three.module.min.js";
 
-const COLORS = { point: 0x8a93a8, trail: 0x3b82f6, candidate: 0xf5a524, estimate: 0xf5a524, active: 0x17c964 };
-const RADII = { point: 0.14, trail: 0.18, candidate: 0.2, estimate: 0.28, active: 0.32 };
+const COLORS = { point: 0x8a93a8, trail: 0x3b82f6, candidate: 0xf5a524, estimate: 0xf5a524, active: 0x17c964, you: 0xffffff };
+const RADII = { point: 0.14, trail: 0.18, candidate: 0.2, estimate: 0.28, active: 0.32, you: 0.24 };
 const toThree = (x, y, z) => new THREE.Vector3(x, z, -y);
 
 export function createMap3d(host) {

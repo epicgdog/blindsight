@@ -1,7 +1,7 @@
-import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, footprintPaths, mapMarkers, scene3d, pushTrail, yawText, errorText } from "./logic.js";
+import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, mapMarkers, scene3d, pushTrail, yawText, errorText, frameMatch, pickRows, whyLines } from "./logic.js";
 
 const $ = (id) => document.getElementById(id);
-let history = [], cueLog = [], times = [], faces = [], placeInfo = {}, mapPano = null, mapData = null, trail = [], lastResult = null, map3d = null, view3d = true;
+let history = [], cueLog = [], times = [], faces = [], placeInfo = {}, mapData = null, trail = [], lastResult = null, map3d = null, view3d = true;
 
 function render(r) {
   lastResult = r;
@@ -45,7 +45,8 @@ const rowEls = new Map();
 
 function renderMatch(r) {
   if (r.jpeg_b64) $("cmp-live").src = "data:image/jpeg;base64," + r.jpeg_b64;
-  const rows = rankRows(r.match, r.location?.pano_id, placeInfo);
+  const match = frameMatch(r); // also on unmatched frames, so a LOST state still shows its evidence
+  const rows = rankRows(match, r.location?.pano_id, placeInfo);
   const list = $("rank-list");
   const seen = new Set();
   for (const row of rows) {
@@ -70,30 +71,47 @@ function renderMatch(r) {
   for (const [place, li] of rowEls) {
     if (!seen.has(place)) { li.remove(); rowEls.delete(place); }
   }
-  if (rows.length) {
-    $("cmp-top").src = rows[0].thumb;
+  // Embedding picks: the reference views retrieval ranked highest, as the actual view images.
+  const picks = pickRows(match, placeInfo);
+  if (picks.length) {
+    const top = picks.find((p) => p.chosen) ?? picks[0];
+    setSrc($("cmp-top"), top.url);
+    $("cmp-top-name").textContent = `${top.name} · ${top.view}`;
+  } else if (rows.length) {
+    setSrc($("cmp-top"), rows[0].thumb);
     $("cmp-top-name").textContent = rows[0].name;
   }
-  // Highest-confidence pano for this frame (most verified inliers), else the reported place.
-  const pano = r.match?.pano ?? r.location?.pano_id;
-  if (pano && pano !== mapPano) {
-    mapPano = pano;
-    $("equirect").src = `/data/pano/${pano}/equirect.jpg`;
-  }
-  const svg = $("footprint");
-  svg.replaceChildren();
-  for (const pts of footprintPaths(r.match?.footprint, 2048, 1024)) {
-    const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-    poly.setAttribute("points", pts);
-    svg.append(poly);
-  }
+  const host = $("picks");
+  while (host.children.length > picks.length) host.lastChild.remove();
+  picks.forEach((p, i) => {
+    let fig = host.children[i];
+    if (!fig) {
+      fig = document.createElement("figure");
+      fig.innerHTML = "<img alt=\"reference view\"><figcaption></figcaption>";
+      host.append(fig);
+    }
+    setSrc(fig.querySelector("img"), p.url);
+    fig.className = p.chosen ? "chosen" : "";
+    fig.querySelector("figcaption").textContent =
+      `${p.rank}. ${p.name} · ${p.view} · sim ${p.sim.toFixed(3)} · ${p.inliers == null ? "not verified" : p.inliers + " inliers"}${p.verdict ? ` · ${p.verdict}` : ""}`;
+  });
+  $("why").replaceChildren(...whyLines(r.localization_debug).map((t) => {
+    const li = document.createElement("li"); li.textContent = t; return li;
+  }));
+}
+
+// Only touch src when it changes, so the same reference image is not refetched every frame.
+function setSrc(img, url) {
+  if (img.dataset.src !== url) { img.dataset.src = url; img.src = url; }
 }
 
 function renderMinimap(r) {
   if (!mapData) return;
   const active = r.location?.state === "LOCKED" ? r.location?.pano_id : null;
   if (active) trail = pushTrail(trail, active, 8);
-  const { floor, name, markers, walls, viewBox, otherFloor } = mapMarkers(mapData, active, r.match?.ranking, trail, 400, 400);
+  const match = frameMatch(r);
+  const position = match?.position ?? null; // tracked camera position (mesh frame), kept between fixes
+  const { floor, name, markers, walls, viewBox, otherFloor } = mapMarkers(mapData, active, match?.ranking, trail, 400, 400, position);
   const svg = $("minimap");
   const NS = "http://www.w3.org/2000/svg";
   const nodes = [];
@@ -112,17 +130,18 @@ function renderMinimap(r) {
     const c = document.createElementNS(NS, "circle");
     c.setAttribute("class", `mm-dot mm-${m.kind}`);
     c.setAttribute("cx", m.x); c.setAttribute("cy", m.y);
-    c.setAttribute("r", ({ active: 12, estimate: 11, point: 5 }[m.kind] ?? 8) * scale);
+    c.setAttribute("r", ({ active: 12, estimate: 11, you: 9, point: 5 }[m.kind] ?? 8) * scale);
     nodes.push(c);
   }
   svg.replaceChildren(...nodes);
   if (map3d) {
-    map3d.update(scene3d(mapData, active, r.match?.ranking, trail));
+    map3d.update(scene3d(mapData, active, match?.ranking, trail, position));
     $("mini-panel").classList.toggle("is3d", view3d);
   }
   $("mm-floor").textContent = floor == null ? "" : `Floor ${floor + 1}`;
   const tag = otherFloor ? " (another floor)" : active ? "" : name ? " (estimate)" : "";
-  $("mm-place").textContent = name ? `${name}${tag}` : "";
+  const you = position ? ` · you ±${position.sigma_m ?? "?"} m (${position.source ?? "track"})` : "";
+  $("mm-place").textContent = name || you ? `${name}${tag}${you}` : "";
 }
 
 // 3D map is optional: no WebGL or a load failure leaves the 2D minimap in place.

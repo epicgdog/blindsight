@@ -26,7 +26,7 @@ from urllib.parse import quote
 import anyio
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, Field
@@ -608,6 +608,38 @@ def create_app(
                     lambda: json.loads(report.read_text())
                 )
         return result
+
+    ref_jpegs: dict = {}
+
+    @app.get("/api/ref/{idx}.jpg")
+    async def ref_image(idx: int, place: str = "", name: str = ""):
+        """One reference view the localizer holds in memory (most are rendered at startup, not on disk).
+        place/name must match, so a cached URL from an earlier server run can never show the wrong view."""
+        runtime = app.state.runtime
+        localizer = runtime.active_localizer or runtime.initial_localizer
+        refs = getattr(localizer, "_refs", None)
+        if refs is None or not 0 <= idx < len(refs):
+            raise HTTPException(404, "Reference not found")
+        ref = refs[idx]
+        if (place and ref.place != place) or (name and ref.view.name != name):
+            raise HTTPException(404, "Reference changed")
+        key = (id(localizer), idx)
+        data = ref_jpegs.get(key)
+        if data is None:
+            import cv2
+
+            def encode():
+                ok, buf = cv2.imencode(".jpg", cv2.cvtColor(ref.view.image, cv2.COLOR_RGB2BGR),
+                                       [cv2.IMWRITE_JPEG_QUALITY, 85])
+                if not ok:
+                    raise HTTPException(500, "Encode failed")
+                return buf.tobytes()
+
+            data = await asyncio.to_thread(encode)
+            if len(ref_jpegs) >= 512:
+                ref_jpegs.pop(next(iter(ref_jpegs)))
+            ref_jpegs[key] = data
+        return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
 
     @app.get("/api/localization")
     async def localization_diagnostics():

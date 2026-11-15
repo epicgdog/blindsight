@@ -67,6 +67,50 @@ export const rankRows = (match, activePano, info = {}) =>
     thumb: thumbUrl(r.place),
   }));
 
+// ---- embedding picks and why a frame did not match ----
+// The match evidence of every frame: r.match is null on unmatched frames, the debug copy is not.
+export const frameMatch = (r) => r?.match ?? r?.localization_debug?.match ?? null;
+
+export const refUrl = (p) =>
+  `/api/ref/${p.ref}.jpg?place=${encodeURIComponent(p.place)}&name=${encodeURIComponent(p.name)}`;
+
+export const pickRows = (match, info = {}) =>
+  (match?.picks ?? []).map((p, i) => ({
+    rank: i + 1,
+    url: refUrl(p),
+    place: p.place,
+    name: placeName(p.place, info),
+    view: p.name,
+    sim: p.sim,
+    inliers: p.inliers,
+    verdict: VERDICT[p.verdict] ?? null,
+    chosen: match.best_ref === p.ref,
+  }));
+
+// Candidate screening before the pick (server/localize.py _screen).
+export const VERDICT = { kept: "kept", pitch: "ruled out: pitch vs phone", far: "ruled out: too far from track", still: "ruled out: standing still" };
+
+// Plain-language reasons this frame was not accepted, from the localizer's debug block.
+export function whyLines(d) {
+  if (!d) return [];
+  const out = [];
+  if (d.reason) out.push(`Reason: ${String(d.reason).replaceAll("_", " ")}`);
+  out.push(`Matched this frame: ${d.matched ? "yes" : "no"} · best inliers ${d.best_inliers ?? 0} (need ${d.thresholds?.N_MIN ?? "?"}) · grid ${d.best_grid_cells ?? 0}/9 (need ${d.thresholds?.GRID_CELLS_MIN ?? "?"})`);
+  if (d.competitor_inliers) out.push(`Competing view inliers: ${d.competitor_inliers}`);
+  if (d.imu_rejected) out.push(`Rejected by pitch gate: match pitch vs phone ${d.imu_pitch}°`);
+  if (d.jump_rejected) out.push("Rejected: too far from the tracked position");
+  if (d.distinctive_evidence && d.distinctive_evidence.required && !d.distinctive_evidence.passed)
+    out.push(`Rejected: only ${d.distinctive_evidence.count} distinctive inliers vs the other place`);
+  if (d.pending_jump) out.push("Large yaw jump waiting for a second frame");
+  if (d.embedded === false) out.push("Retrieval reused from an earlier frame (EMBED_EVERY_N_FRAMES)");
+  const c = [...(d.candidates ?? [])].sort((a, b) => (b[2] ?? 0) - (a[2] ?? 0)).slice(0, 4);
+  if (d.screened === false && (d.candidates ?? []).some((x) => x[4] && x[4] !== "kept"))
+    out.push("No plausible candidate passed; judged unfiltered (lets the tracker restart on a repeated far match)");
+  if (c.length) out.push("Verified: " + c.map(([name, place, inl, grid, v]) => `${String(place).slice(0, 6)}/${name} ${inl} in, ${grid} cells${v && v !== "kept" ? ` [${VERDICT[v] ?? v}]` : ""}`).join(" · "));
+  if (d.total != null) out.push(`Localizer ${d.total} ms (embed ${d.embed}, extract ${d.extract}, verify ${d.verify})`);
+  return out;
+}
+
 // Footprint x is unwrapped around the view centre, so draw copies at -1, 0 and +1 panos wide.
 export function footprintPaths(poly, w, h) {
   if (!poly?.length) return [];
@@ -104,9 +148,9 @@ export function pushTrail(trail, place, max = 8) {
 const scanName = (p) => (p?.room ? p.room : p?.label != null ? `Scan ${p.label}` : "");
 
 // Markers for the active floor: the active place, ranked candidates, recent trail, other points.
-export function mapMarkers(map, activeId, ranking, trail, w, h) {
+export function mapMarkers(map, activeId, ranking, trail, w, h, position = null) {
   if (!map?.points?.length) return { floor: null, name: "", markers: [] };
-  if (map.walls?.length) return wallMarkers(map, activeId, ranking, trail);
+  if (map.walls?.length) return wallMarkers(map, activeId, ranking, trail, position);
   const ranked = (ranking ?? []).map((r) => r.place);
   const focus = activeId ?? ranked[0] ?? null;
   const floor = floorOfPlace(map.points, focus) ?? 0;
@@ -119,6 +163,10 @@ export function mapMarkers(map, activeId, ranking, trail, w, h) {
     else if ((trail ?? []).includes(p.id)) kind = "trail";
     return { id: p.id, kind, x: proj[p.id].x, y: proj[p.id].y, rank: ranked.indexOf(p.id) + 1 };
   });
+  if (hasXY(position)) {
+    const you = mapProject([...here, { id: "__you", x: position.x, y: position.y }], map.bounds, w, h, 24).__you;
+    markers.push({ id: "you", kind: "you", x: you.x, y: you.y, rank: 0 });
+  }
   const active = map.points.find((p) => p.id === activeId);
   return { floor, name: active ? scanName(active) : "", markers };
 }
@@ -138,7 +186,9 @@ export function errorText(status, body) {
 const WALL_PX_PER_M = 40;
 const WALL_MARGIN_M = 2;
 
-function wallMarkers(map, activeId, ranking, trail) {
+const hasXY = (p) => Number.isFinite(p?.x) && Number.isFinite(p?.y);
+
+function wallMarkers(map, activeId, ranking, trail, position = null) {
   const ranked = (ranking ?? []).map((r) => r.place);
   const floor = 0;
   const here = map.points.filter((p) => p.floor === floor);
@@ -159,7 +209,8 @@ function wallMarkers(map, activeId, ranking, trail) {
     else if ((trail ?? []).includes(p.id)) kind = "trail";
     return { id: p.id, kind, x: px(p.x), y: py(p.y), rank: ranked.indexOf(p.id) + 1 };
   });
-  const walls = map.walls.map(([x1, y1, x2, y2]) => [px(x1), py(y1), px(x2), py(y2)]);
+  if (hasXY(position)) markers.push({ id: "you", kind: "you", x: px(position.x), y: py(position.y), rank: 0 });
+  const walls =map.walls.map(([x1, y1, x2, y2]) => [px(x1), py(y1), px(x2), py(y2)]);
   return {
     floor,
     name: focus ? scanName(focus) : "",
@@ -179,7 +230,7 @@ export const WALL_HEIGHT_M = 2.5;
 // Scan point at the building entrance (scan 28), found by standing at the door with the phone.
 export const ENTRANCE_ID = "n0ppizy9u8xcadypd2bawceyc";
 
-export function scene3d(map, activeId, ranking, trail) {
+export function scene3d(map, activeId, ranking, trail, position = null) {
   if (!map?.points?.length) return null;
   const ranked = (ranking ?? []).map((r) => r.place);
   const activePoint = map.points.find((p) => p.id === activeId);
@@ -195,6 +246,10 @@ export function scene3d(map, activeId, ranking, trail) {
     if (p.id === ENTRANCE_ID) out.label = "Entrance";
     return out;
   });
+  // The tracked camera position (mesh frame, same as the scan points), shown as its own dot.
+  if (hasXY(position) && Number.isFinite(position.z)) {
+    points.push({ id: "you", kind: "you", x: position.x, y: position.y, z: position.z, floor: 0, rank: 0, label: "You" });
+  }
   const floors = (map.floors ?? []).map((f) => ({ floor: f.floor, base_z: +(f.z - CAM_HEIGHT_M).toFixed(2) }));
   const ground = floors.find((f) => f.floor === 0)?.base_z ?? Math.min(...map.points.map((p) => p.z)) - CAM_HEIGHT_M;
   const here = points.filter((p) => p.floor === 0);
