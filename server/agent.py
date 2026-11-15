@@ -42,6 +42,7 @@ from server.heading import HeadingKalman, wrap180
 from server.place_window import PlaceWindow
 from server.route import TURN_DEG, clock
 from server.scene_memory import SceneMemory
+from server.venue import Start, Venue
 from server.voice import pcm_to_wav, wav_response
 
 log = logging.getLogger("insight.agent")
@@ -125,6 +126,13 @@ Using the tools (silently, then just talk)
 - "Stop" / "never mind": stop_navigation. "How far?": get_route_status or the context.
 - The destination is the entrance unless they dropped a pin on the map (the CONTEXT goal then says
   "your pin"); guide to whatever the goal is. "Take me to my pin" is start_navigation with 'pin'.
+- HackPrinceton rooms (the building is JRR with the Simpson building; levels 2, 1 the ground floor, and A one
+  floor below ground): for any room, by number ("A97", "two oh one") or by purpose ("judges room", "judging",
+  "sponsors", "CoStar", "hacker space", "food", "check-in", "bathroom"), call find_place with their words.
+  "Judges room" (judges and mentors, A97/A98) and "judging room" (A71, where projects are presented) are
+  different rooms: say which one you found. Then navigate_to with the room id they want (the nearest one if
+  they did not choose), and tell them the level and distance and the first step from its steps.
+  "What's next?" during a room route: the CONTEXT venue line has the current next step.
 - Only say guidance started or stopped if the tool result says ok."""
 
 TOOLS = [
@@ -139,6 +147,13 @@ TOOLS = [
     ("plan_route", "The whole path from where the person stands to the entrance: total meters and each "
                    "straight leg with the turn before it (first turn relative to where they face).", {}),
     ("describe_view", "Describe the latest camera image in one sentence.", {}),
+    ("find_place", "Find HackPrinceton venue rooms by room number or purpose (judges room, judging, sponsor, "
+                   "CoStar, hacker space, food, check-in, cafe, bathroom). Nearest first, with level and meters.",
+     {"query": ("STRING", "What they asked for, in their words, e.g. 'judges room' or 'A97'.")}),
+    ("navigate_to", "Guide the person to a venue room (an id from find_place). Returns the level, distance and "
+                    "the spoken steps, first step relative to where they face.",
+     {"room": ("STRING", "Room id from find_place, e.g. 'A98'."),
+      "prefer": ("STRING", "Optional: 'stairs' or 'elevator'.")}),
 ]
 
 
@@ -215,6 +230,13 @@ class AgentState:
         self.memory = SceneMemory()
         self.map = EntranceMap.load(self.data_dir, entrance)
         self.guide = EntranceGuide(self.map)
+        try:
+            self.venue: Venue | None = Venue.load()
+        except (OSError, ValueError, KeyError):
+            log.warning("venue data unavailable", exc_info=True)
+            self.venue = None
+        self.venue_dest: str | None = None  # HackPrinceton room being guided to
+        self.venue_prefer: str | None = None
         self.heading = HeadingKalman(self.map.frames)
         self.place_label = place_label or self.map.label
         self.decision = self.window.decide(0.0)
@@ -491,7 +513,14 @@ class AgentState:
             route = route_sentence(describe_route(self.map, d.place, self._guidance_yaw(self.t + time.monotonic() - self._received_at), self.position, self.heading.estimate.get("heading_deg"), stride=self.guide.stride))
         if not direction.get("navigation_ready"):
             route = direction["instruction"]
-        return f"CONTEXT: Current instruction: {direction['instruction']} Path to {self.map.goal_label} from here: {route}. In view now: {now}. Seen in the last minute: {recent or 'nothing'}. Place: {place}. Facing direction: {facing}. Goal: {goal}."
+        venue = ""
+        with self.lock:
+            vr = self.venue_route()
+        if vr and vr.get("ok"):
+            venue = (f" Venue destination: {vr['to']['name']} on {vr['to']['level_name']}, about {vr['total_m']:.0f} m"
+                     f"{' (counted from check-in: position unknown)' if vr.get('start_assumed') else ''};"
+                     f" next step: {vr['steps'][0]}")
+        return f"CONTEXT: Current instruction: {direction['instruction']} Path to {self.map.goal_label} from here: {route}. In view now: {now}. Seen in the last minute: {recent or 'nothing'}. Place: {place}. Facing direction: {facing}. Goal: {goal}.{venue}"
 
     def snapshot(self) -> dict:
         with self.lock:
@@ -502,7 +531,69 @@ class AgentState:
                        # raw phone compass (magnetic/true north, not the map frame), for comparison
                        "compass_deg": self._compass_buf[-1][1] if self._compass_buf else None}
             return {"decision": self.decision.to_dict(), "place_label": self.place_label(self.decision.place),
-                    "nav": self.guide.status, "heading": heading, "path": self._path_view()}
+                    "nav": self.guide.status, "heading": heading, "path": self._path_view(),
+                    "venue": self.venue_view()}
+
+    # -- HackPrinceton venue rooms ----------------------------------------------
+    def venue_start(self) -> Start | None:
+        """Where the person is on the venue plans: the tracked position (level from its height),
+        else the decided scan point (Level 1 scan points), else unknown."""
+        if self.venue is None:
+            return None
+        start = self.venue.start_from_position(self.position)
+        if start is None and self.decision.place in self.map.points:
+            x, y = self.map.points[self.decision.place]
+            start = Start("1", self.venue.to_px("1", x, y))
+        return start
+
+    def venue_route(self) -> dict | None:
+        """The route to the venue destination from where the person is now (from check-in, 117,
+        while the position is unknown), first step relative to the way they face."""
+        if self.venue is None or self.venue_dest is None:
+            return None
+        start, assumed = self.venue_start(), False
+        if start is None:
+            check_in = self.venue.rooms["117"]
+            start, assumed = Start(check_in["level"], tuple(check_in["door"])), True
+        heading = None if assumed else self.heading.estimate.get("heading_deg")
+        out = self.venue.route(self.venue_dest, start, self.venue_prefer, heading)
+        out["start_assumed"] = assumed
+        return out
+
+    def venue_view(self) -> dict | None:
+        """For the phone: where the person is on the plans and the live route, if any."""
+        if self.venue is None:
+            return None
+        start = self.venue_start()
+        return {"you": None if start is None else {"level": start.level, "px": [round(v, 1) for v in start.px]},
+                "dest": None if self.venue_dest is None else self.venue.room_info(self.venue_dest),
+                "route": self.venue_route()}
+
+    def set_venue_destination(self, room: str | None, prefer: str | None = None) -> dict:
+        """Guide to a venue room (None clears it). The entrance/pin guidance stops meanwhile:
+        one destination at a time."""
+        with self.lock:
+            if room is None:
+                self.venue_dest, self.venue_prefer = None, None
+                return {"ok": True, "cleared": True}
+            if self.venue is None:
+                return {"ok": False, "reason": "venue map unavailable"}
+            rid = next((k for k in self.venue.rooms if k.lower() == str(room).strip().lower()), None)
+            if rid is None:
+                hits = self.venue.search(str(room), self.venue_start())
+                if len(hits) != 1:
+                    return {"ok": False, "reason": f"no single room matches '{room}'",
+                            "candidates": [h["id"] for h in hits]}
+                rid = hits[0]["id"]
+            if prefer not in (None, "", "stairs", "elevator"):
+                return {"ok": False, "reason": "prefer must be stairs or elevator"}
+            self.venue_dest, self.venue_prefer = rid, prefer or None
+            self.guide.stop()
+            route = self.venue_route()
+            return {"ok": bool(route and route.get("ok")), "to": self.venue.room_info(rid),
+                    "total_m": route.get("total_m") if route else None,
+                    "steps": route.get("steps") if route else [],
+                    "start_assumed": route.get("start_assumed") if route else None}
 
     def _path_view(self) -> dict:
         """The route for the viewer (map frame, metres): the one being guided, else a preview planned
@@ -578,6 +669,7 @@ class AgentState:
                         return {"ok": False, "reason": "only the entrance or the dropped pin are supported"}
                     if self.map.goal_kind != "entrance":
                         self.map.clear_destination()
+                self.venue_dest = None  # one destination at a time
                 result = self.guide.start(d.place, self.position if d.place else None)
                 if not result.get("ok"):
                     return result
@@ -586,7 +678,22 @@ class AgentState:
                         "navigation_ready": direction.get("navigation_ready", False),
                         "instruction": direction["instruction"]}
             if name == "stop_navigation":
+                self.venue_dest = None
                 return self.guide.stop()
+            if name == "find_place":
+                if self.venue is None:
+                    return {"ok": False, "reason": "venue map unavailable"}
+                start = self.venue_start()
+                check_in = self.venue.rooms["117"]
+                # unknown position: rank by distance from check-in, the usual starting point
+                hits = self.venue.search(str(args.get("query") or ""),
+                                         start or Start(check_in["level"], tuple(check_in["door"])))
+                return {"ok": bool(hits), "position_known": start is not None,
+                        "results": [{k: h.get(k) for k in ("id", "name", "level_name", "roles", "distance_m", "note")}
+                                    for h in hits] or None,
+                        "note": None if hits else "no room matches; ask them to say it another way"}
+            if name == "navigate_to":
+                return self.set_venue_destination(args.get("room"), args.get("prefer"))
             if name == "get_route_status":
                 direction = self.direction()
                 status = dict(self.guide.status) if direction.get("navigation_ready") else {
@@ -916,6 +1023,16 @@ def agent_router(get_agent) -> APIRouter:
                 # Resume toward the current destination (a dropped pin stays the destination).
                 out = state.tool("start_navigation", {"destination": "pin" if state.map.goal_kind == "pin" else "entrance"})
             return {**out, "active": state.guide.active}
+
+    @router.post("/venue")
+    async def venue_destination(request: Request):
+        """Body {"to": "A98", "prefer"?: "stairs"|"elevator"} guides to a venue room; {"to": null} clears."""
+        try:
+            body = await request.json()
+        except ValueError as ex:
+            raise HTTPException(422, "JSON body required") from ex
+        to = body.get("to")
+        return need().state.set_venue_destination(None if to in (None, "") else str(to), body.get("prefer"))
 
     @router.get("/destination")
     async def destination_preview(x: float, y: float):

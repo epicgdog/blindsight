@@ -144,3 +144,51 @@ def test_api(settings):
         assert client.get("/api/venue/route", params={"to": "201"}).json()["ok"]
         assert client.get("/api/venue/route", params={"to": "A98", "prefer": "ladder"}).status_code == 422
         assert client.get("/api/venue/search", params={"q": "x", "from_room": "nope"}).status_code == 404
+
+
+# -- agent integration ---------------------------------------------------------
+
+@pytest.fixture
+def state(tmp_path):
+    from pathlib import Path
+
+    from server.agent import AgentState
+    return AgentState(Path("data") if Path("data/matterport").exists() else tmp_path)
+
+
+def test_agent_find_place_ranks_from_check_in_without_a_position(state):
+    out = state.tool("find_place", {"query": "judges room"})
+    assert out["ok"] and out["position_known"] is False
+    assert [r["id"] for r in out["results"]] == ["A98", "A97"]
+
+
+def test_agent_navigate_to_sets_destination_and_returns_steps(state):
+    out = state.tool("navigate_to", {"room": "A98"})
+    assert out["ok"] and out["to"]["id"] == "A98" and out["start_assumed"] is True
+    assert out["steps"][-1].endswith("door on your right.")
+    assert state.snapshot()["venue"]["dest"]["id"] == "A98"
+    assert "Venue destination: Judges and mentors room A98" in state.context_line()
+
+
+def test_agent_route_follows_the_tracked_position(state):
+    state.tool("navigate_to", {"room": "A98"})
+    state.position = {"x": 0.0, "y": -5.0, "z": 1.4, "sigma_m": 0.4}
+    view = state.venue_view()
+    assert view["you"]["level"] == "1"
+    assert view["route"]["start_assumed"] is False
+
+
+def test_agent_navigate_to_by_purpose_needs_a_single_match(state):
+    assert state.set_venue_destination("judging")["to"]["id"] == "A71"
+    out = state.set_venue_destination("hacker space")
+    assert out["ok"] is False and len(out["candidates"]) > 1
+
+
+def test_agent_one_destination_at_a_time(state):
+    state.tool("navigate_to", {"room": "A98"})
+    state.tool("start_navigation", {"destination": "entrance"})
+    assert state.venue_dest is None
+    state.tool("navigate_to", {"room": "201"})
+    assert state.guide.active is False
+    state.tool("stop_navigation", {})
+    assert state.venue_dest is None

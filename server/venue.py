@@ -239,9 +239,10 @@ class Venue:
         name = min(nodes, key=lambda n: math.dist(nodes[n], start.px))
         return (start.level, name)
 
-    def route(self, to: str, start: Start, prefer: str | None = None) -> dict:
+    def route(self, to: str, start: Start, prefer: str | None = None, heading_deg: float | None = None) -> dict:
         """Shortest walk from start to the room's door. prefer: 'stairs' or 'elevator' (else the
-        elevator unless it adds more than STAIRS_PENALTY_M)."""
+        elevator unless it adds more than STAIRS_PENALTY_M). heading_deg: the way the person faces
+        (map frame, clockwise from north), which makes the first step a turn relative to them."""
         if to not in self.rooms:
             return {"ok": False, "reason": f"unknown room {to}"}
         if start.level not in self.nodes:
@@ -301,11 +302,12 @@ class Venue:
                      for a, b, link in links]
         out = {"ok": True, "to": self.room_info(to), "from_level": start.level, "legs": legs, "door_hop": door_hop,
                "transfers": transfers, "total_m": round(walk + STAIRS_M * sum(t["kind"] == "stairs" for t in transfers), 1)}
-        out["steps"] = self.steps(out)
+        out["steps"] = self.steps(out, heading_deg)
         return out
 
-    def steps(self, route: dict) -> list[str]:
-        """Spoken step list: walk distances, turns, level changes, which side the door is on."""
+    def steps(self, route: dict, heading_deg: float | None = None) -> list[str]:
+        """Spoken step list: walk distances, turns, level changes, which side the door is on.
+        With heading_deg the first step starts with the turn from where the person faces."""
         out: list[str] = []
         legs, transfers = route["legs"], route["transfers"]
         order = {k: v["order"] for k, v in self.levels.items()}
@@ -315,7 +317,10 @@ class Venue:
                 pts = pts[:-1]  # the last hop is corridor -> door: said as "the door on your left/right"
             segs = _segments(pts, self.scale(leg["level"]))
             for j, (length, bearing) in enumerate(segs):
-                if j == 0:
+                if j == 0 and i == 0 and heading_deg is not None and math.isfinite(heading_deg):
+                    # image up is map north (align rot is 0), so bearings compare directly
+                    out.append(_first_step(_turn(heading_deg - self.align[leg["level"]]["rot"], bearing), length))
+                elif j == 0:
                     lead = "Walk" if i == 0 else "From there, walk"
                     out.append(f"{lead} about {_m(length)}.")
                 else:
@@ -407,6 +412,16 @@ def _door_side(pts, min_px: float = 9.0) -> str | None:
     if ang < 30:
         return "ahead"
     return "right" if cross > 0 else "left"
+
+
+def _first_step(turn: float, length: float) -> str:
+    a = abs(turn)
+    side = "right" if turn > 0 else "left"
+    if a <= 30:
+        return f"Walk straight ahead about {_m(length)}."
+    if a >= 150:
+        return f"Turn around, then walk about {_m(length)}."
+    return f"Turn {'slightly ' if a < 60 else ''}{side}, then walk about {_m(length)}."
 
 
 def _m(meters: float) -> str:
