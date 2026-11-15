@@ -294,6 +294,25 @@ def save_capture(settings: Settings, kind: str, jpeg: bytes) -> str:
     return str((folder / name).relative_to(settings.data_dir))
 
 
+def save_camera_meta(settings: Settings, session: str, text: str) -> dict | None:
+    """A phone camera metadata sample ({"type": "camera_meta", exif, sizes, sensors}) appended to
+    data/camera_meta/<session>.jsonl. None (and nothing written) when the text is not one."""
+    if len(text) > 256_000:
+        return None
+    try:
+        value = json.loads(text)
+    except (ValueError, RecursionError):
+        return None
+    if not isinstance(value, dict) or value.get("type") != "camera_meta":
+        return None
+    value["server_time"] = time.time()
+    folder = settings.data_dir / "camera_meta"
+    folder.mkdir(parents=True, exist_ok=True)
+    with (folder / f"{session}.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps(value, default=str) + "\n")
+    return value
+
+
 def percentiles(values):
     if not values:
         return {"p50": None, "p95": None}
@@ -367,6 +386,7 @@ class Runtime:
     warmup: Warmup | None = None
     agent: object = None
     voice: object = None
+    camera_meta: dict | None = None  # latest phone camera metadata sample
 
     async def work(self, function, *args):
         future = asyncio.get_running_loop().run_in_executor(self.executor, function, *args)
@@ -623,6 +643,11 @@ def create_app(
             ref_jpegs[key] = data
         return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
 
+    @app.get("/api/camera_meta")
+    async def camera_meta():
+        """Latest camera metadata sample from the phone (EXIF, photo and sent sizes), or null."""
+        return {"latest": app.state.runtime.camera_meta}
+
     @app.get("/api/localization")
     async def localization_diagnostics():
         runtime = app.state.runtime
@@ -705,6 +730,7 @@ def create_app(
         runtime.metrics.connected_at = time.monotonic()
         runtime.metrics.time_to_locked_ms = None
         queue = asyncio.Queue(maxsize=1)
+        meta_session = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
         voice_queue: asyncio.Queue = asyncio.Queue()
         send_lock = asyncio.Lock()
         pipeline = None
@@ -718,6 +744,12 @@ def create_app(
                 received_s = time.monotonic()
                 raw = message.get("bytes")
                 if raw is None and message.get("text") is not None:
+                    if '"camera_meta"' in message["text"][:64]:
+                        # Camera metadata sample (EXIF, sizes), every 20th frame: recorded for calibration.
+                        meta = await asyncio.to_thread(save_camera_meta, settings, meta_session, message["text"])
+                        if meta is not None:
+                            runtime.camera_meta = meta
+                        continue
                     # Phone sensor sample (JSON text, ~10 Hz). Never fatal: a bad one is dropped.
                     imu = parse_imu(message["text"])
                     if imu is not None and runtime.agent is not None:

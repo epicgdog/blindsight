@@ -23,7 +23,7 @@ const logApp = makeLog("app"), logWs = makeLog("ws"), logTalk = makeLog("talk"),
   logCam = makeLog("cam"), logVoice = makeLog("voice"), logSpeech = makeLog("speech"), logLoc = makeLog("loc");
 import { attitudeFromGravity, createMotionDetector, smoothGravity } from "./src/attitude";
 import { ackBody, createAckTracker, sendAck, speechAckUrl } from "./src/ack";
-import { PICTURE_OPTIONS, PICTURE_SIZE, SAVE_OPTIONS, resizePlan } from "./src/camera";
+import { META_EVERY, PICTURE_OPTIONS, PICTURE_SIZE, SAVE_OPTIONS, cameraMetaMessage, resizePlan } from "./src/camera";
 import { File } from "expo-file-system";
 import { RECORD_MODE, agentQuietUrl, agentTalkUrl, postClip, createHoldToTalk } from "./src/talk";
 import NativeNavigation, { trackingModule } from "./NativeNavigation";
@@ -49,6 +49,8 @@ function LegacyApp() {
   const talkController = useRef(null);
   const frames = useRef([]);
   const sizeLogged = useRef(false);
+  const shots = useRef(0);
+  const availableSizes = useRef(null);
   const ackUrl = useRef(null);
   const attitude = useRef(null);
   const [pitch, setPitch] = useState(null);
@@ -195,6 +197,14 @@ function LegacyApp() {
         if (!sizeLogged.current) {
           sizeLogged.current = true;
           logCam("first frame", { camera: `${p.width}x${p.height}`, sending: `${out.width}x${out.height}` });
+          try { availableSizes.current = await camera.current.getAvailablePictureSizesAsync(); } catch {}
+        }
+        // Camera metadata (EXIF + sizes) on the first frame and every META_EVERY frames.
+        if (shots.current++ % META_EVERY === 0) {
+          client.current?.sendJson(cameraMetaMessage({
+            seq: shots.current, photo: p, sent: out, exif: p.exif, sensors,
+            pictureSize: PICTURE_SIZE, availableSizes: availableSizes.current,
+          }));
         }
         return { bytes: base64ToBytes(out.base64), w: out.width, h: out.height, sensors };
       },
