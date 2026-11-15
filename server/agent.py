@@ -329,7 +329,9 @@ class AgentState:
             self._received_at = time.monotonic()
             self.t = t
             match = match or {}
-            ranking = match.get("ranking") if location.get("state", "LOCKED") == "LOCKED" else None
+            # Every verified frame counts (the server sends match only for matched frames); LOCKED also
+            # needs yaw agreement over frames, which the place itself does not depend on.
+            ranking = match.get("ranking")
             self.decision = self.window.push(t, ranking)
             self.position = match.get("position")
             place = self.decision.place

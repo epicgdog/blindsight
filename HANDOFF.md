@@ -48,10 +48,11 @@ The phone has no on-device speech. One **Gemini Live** session per phone connect
 
 Supporting pieces:
 
-- **Place decision** (`server/place_window.py`): per-frame confidence is
-  `(i1/(i1+N_MIN)) * (i1/(i1+i2))` from the match ranking's inliers. Over the last 5 s, the most
-  confident frame above 0.70 decides the place. With no confident frame it holds the last place;
-  after 10 s the place is unknown.
+- **Place decision** (`server/place_window.py`): a verified frame wins for its top place when
+  it has >= N_MIN inliers and >= 1.3x the runner-up. 3 wins within 5 s decide the place (any
+  verified frame counts, LOCKED is not required). With no decision it holds the last place;
+  after 10 s the place is unknown. (The old one-frame confidence > 0.70 never fired once rival
+  places were verified: 125 vs 80 inliers scores 0.48.)
 - **Route to the entrance** (`server/entrance_nav.py`): the entrance is scan 28,
   `n0ppizy9u8xcadypd2bawceyc` (also `ENTRANCE_ID` in `server/viewer/logic.js`).
   - The graph is the 36 floor-0 scan points, joined when ≤ 6 m apart and the line between them
@@ -86,7 +87,7 @@ Measured with the key (in-process server, stub localizer, real Live API):
    make the agent read the property localizer's output.
 3. **Guidance turn direction is unverified on site.** Walk the route and check that "turn right"
    is right.
-4. The 0.70 confidence threshold is untuned on real photos.
+4. The 1.3x margin and 3-win rule are tuned on one logged run only.
 5. Live sometimes embellishes ("it's right ahead"). The prompt forbids it; watch for it.
 6. A Live session drops on errors and reconnects on next use, but loses the conversation.
 

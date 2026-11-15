@@ -26,36 +26,45 @@ def test_confidence_rewards_strength_and_punishes_ties():
     assert frame_confidence(None) == (None, 0.0)
 
 
-def test_window_picks_highest_confident_frame_then_holds_then_unknown():
+def test_window_decides_after_three_clear_wins_then_holds_then_unknown():
     w = PlaceWindow()
-    assert w.push(0.0, rank(("a", 200), ("b", 10))).place == "a"
-    d = w.push(1.0, rank(("b", 300), ("a", 5)))
-    assert (d.place, d.state) == ("b", "confident")  # highest confidence in the window wins
-    w.push(6.5, rank(("c", 20)))  # weak frames only; old frames left the 5 s window
-    d = w.decide(6.5)
-    assert (d.place, d.state) == ("b", "holding")
-    d = w.push(11.5, rank(("c", 20)))
-    assert (d.place, d.state) == (None, "unknown")
+    for t in (0.0, 1.0):
+        assert w.push(t, rank(("a", 125), ("b", 80))).state == "unknown"  # 2 wins: not yet
+    d = w.push(2.0, rank(("a", 125), ("b", 80)))  # 125 >= 1.3 x 80: a steady winner decides
+    assert (d.place, d.state, d.confident_frames) == ("a", "confident", 3)
+    w.push(8.0, rank(("c", 20)))  # weak frames only; old wins left the 5 s window
+    assert (w.decide(8.0).place, w.decide(8.0).state) == ("a", "holding")
+    assert w.push(12.5, rank(("c", 20))).place is None
 
 
-def test_window_ignores_frames_at_or_below_threshold():
+def test_window_needs_strength_and_margin():
     w = PlaceWindow()
-    d = w.push(0.0, rank(("a", 70)))  # exactly 0.70 is not > 0.70
+    for t in range(5):
+        d = w.push(float(t), rank(("a", 100), ("b", 90)))  # too close to the runner-up
+    assert d.state == "unknown"
+    w.reset()
+    for t in range(5):
+        d = w.push(float(t), rank(("a", 29)))  # below N_MIN
     assert d.state == "unknown"
 
 
 def test_window_expires_even_when_camera_stops_sending():
     w = PlaceWindow()
-    w.push(0, rank(("a", 200)))
+    for t in (0, 0.5, 1):
+        w.push(t, rank(("a", 200)))
     assert w.decide(4).place == "a"
-    assert w.decide(6).state == "holding"
-    assert w.decide(11).place is None
+    assert w.decide(7).state == "holding"
+    assert w.decide(12).place is None
 
 
-def test_unverified_localizer_result_cannot_drive_agent(tmp_path):
+def test_only_verified_frames_drive_the_agent(tmp_path):
     state = make_state(tmp_path)
-    state.on_frame(0, {"ranking": rank(("a", 200))}, [], {"state":"UNCERTAIN", "pano_id":"a"})
+    for t in range(3):  # the server sends no match for unverified frames
+        state.on_frame(t, None, [], {"state": "LOST", "pano_id": "a"})
     assert state.tool("get_location", {})["place"] == "unknown"
+    for t in range(3, 6):
+        state.on_frame(t, {"ranking": rank(("a", 200))}, [], {"state": "UNCERTAIN", "pano_id": "a"})
+    assert state.decision.place == "a"
 
 
 # ---- graph and guidance --------------------------------------------------------------
