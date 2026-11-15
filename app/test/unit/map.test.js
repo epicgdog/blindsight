@@ -139,7 +139,7 @@ test("banner for every screen state", () => {
   assert.deepEqual([unknownFacing.title, unknownFacing.meters], ["Turn right", "8 m"]);
   assert.equal(banner({ connected: true, nav: { active: true, next: "the entrance", next_m: 3 }, position: at }).title, "Continue to the entrance");
   assert.equal(banner({ connected: true, nav: { active: false, arrived: true } }).title, "You're at the entrance");
-  assert.equal(banner({ connected: true, nav: { active: false } }).title, "Guidance off");
+  assert.equal(banner({ connected: true, nav: { active: false } }).title, "Add a pin to choose where to go");
 });
 
 test("frame fields: position from the match or its debug copy", () => {
