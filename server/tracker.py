@@ -104,6 +104,21 @@ class PositionTracker:
         if sp > MAX_SPEED:
             self.x[2:] *= MAX_SPEED / sp
 
+    def plausible(self, t: float, moving: bool | None, xyz, sigma_m: float) -> bool:
+        """Would a measurement at xyz pass the gate at time t? Read only: the track is unchanged."""
+        if self.x is None:
+            return True
+        motion = "unknown" if moving is None else ("walking" if moving else "still")
+        saved = (self.x.copy(), self.P.copy(), self.t)
+        try:
+            self.predict(t, motion)
+            y = np.asarray(xyz[:2], float) - self.x[:2]
+            S = self.P[:2, :2] + np.eye(2) * sigma_m ** 2
+            d2 = float(y @ np.linalg.solve(S, y))
+        finally:
+            self.x, self.P, self.t = saved
+        return d2 <= GATE_CHI2 and abs(float(xyz[2]) - self.z) <= FLOOR_DZ_M
+
     def step(self, t: float, moving: bool | None, m: Measurement | None) -> TrackStep:
         motion = "unknown" if moving is None else ("walking" if moving else "still")
         if self.x is None:

@@ -43,7 +43,7 @@ import sys
 import threading
 import time
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 import cv2
@@ -941,15 +941,62 @@ class Localizer:
             return []
         return [int(i) for i in idx[np.argsort(-sims[idx])[:k]]]
 
-    def _yaw_neighbor(self, yaw: float) -> int | None:
-        best, bd = None, 1e9
-        place = (self._place if self.multi else None) or self.pano_id
+    def _yaw_neighbor(self, yaw: float, pitch: float | None = None, place: str | None = None) -> int | None:
+        """The pano view of a place nearest a yaw, in the reference row (pitch -10/0/+10) nearest
+        the phone's pitch (0 when unknown)."""
+        best, bk = None, (1e9, 1e9)
+        place = place or (self._place if self.multi else None) or self.pano_id
+        p = 0.0 if pitch is None else float(pitch)
         for i, r in enumerate(self._refs):
-            if r.demo and r.view.source == "pano" and r.view.pitch == 0 and r.place == place:
-                d = ang_diff(r.view.yaw, yaw)
-                if d < bd:
-                    best, bd = i, d
+            if r.demo and r.view.source == "pano" and r.place == place:
+                k = (abs(r.view.pitch - p), ang_diff(r.view.yaw, yaw))
+                if k < bk:
+                    best, bk = i, k
         return best
+
+    def _ref_places(self) -> np.ndarray:
+        """Place of every reference, as an array (rebuilt when references are added)."""
+        arr = getattr(self, "_places_arr", None)
+        if arr is None or len(arr) != len(self._refs):
+            arr = self._places_arr = np.array([r.place for r in self._refs])
+        return arr
+
+    def _extra_views(self, heading: float | None, pitch: float | None) -> list[int]:
+        """Views verified on top of retrieval's picks: the predicted-yaw view of the reported place
+        and, when the position track is at another place, that place's predicted-yaw view and its
+        best retrieval view, so the place we are tracked at is always checked."""
+        out: list[int] = []
+        pred = self._sm.predicted_yaw(heading)
+        if pred is not None:
+            out.append(self._yaw_neighbor(pred, pitch))
+        tp = self.tracker.place
+        if self.multi and tp is not None:
+            if pred is not None and tp != self._place:
+                out.append(self._yaw_neighbor(pred, pitch, tp))
+            if self._sims is not None and len(self._sims) == len(self._refs):
+                idx = np.flatnonzero((self._ref_places() == tp) & self._is_demo)
+                if len(idx):
+                    out.append(int(idx[np.argmax(self._sims[idx])]))
+        return [i for i in dict.fromkeys(out) if i is not None]
+
+    def _screen(self, fe, pitch_deg, moving, still: bool) -> dict[int, str]:
+        """Why each verified candidate place is ruled out (idx -> reason); absent = kept.
+        Competing views are evidence against a place and are never ruled out."""
+        out: dict[int, str] = {}
+        t = self.clock()
+        tp = self.tracker.place
+        for c in fe.cands:
+            if not c.demo:
+                continue
+            if pitch_deg is not None and c.pitch is not None and abs(float(c.pitch) - float(pitch_deg)) > PITCH_GATE_DEG:
+                out[c.idx] = "pitch"
+            elif self.multi and still and self._place is not None and c.place != self._place:
+                out[c.idx] = "still"
+            elif self.tracker.ready and tp is not None and c.place != tp:
+                xyz = self._scan_xyz.get(c.place)
+                if xyz is not None and not self.tracker.plausible(t, moving, xyz, SCAN_POINT_SIGMA_M):
+                    out[c.idx] = "far"
+        return out
 
     def _cand_of(self, i: int, sims: np.ndarray) -> Cand:
         r = self._refs[i]
@@ -1017,19 +1064,29 @@ class Localizer:
             heading = None if heading_deg is None else float(heading_deg)
             n_every = max(1, int(self.s.EMBED_EVERY_N_FRAMES))
             embed_now = self._sims is None or (self._n - 1) % n_every == 0
-            pred = self._sm.predicted_yaw(heading)
-            extra = [self._yaw_neighbor(pred)] if pred is not None else []
-            fe = self.evaluate_frame(frame_rgb, detections, extra_demo=extra,
+            still = moving is False
+            fe = self.evaluate_frame(frame_rgb, detections, extra_demo=self._extra_views(heading, pitch_deg),
                                      sims=None if embed_now else self._sims, competitors="if_needed",
                                      verify_cands=self.mode != "retrieval")
             if embed_now:
                 self._sims = fe.sims
-            matched, best = fe.decide(self.s, self.mode, MULTI_MARGIN if self.multi else None)
+            margin = MULTI_MARGIN if self.multi else None
+            # Filter first, then pick: candidates the phone's pitch, the position track or the
+            # standing-still hold rule rule out are dropped, and the best of the rest is chosen.
+            verdicts = self._screen(fe, pitch_deg, moving, still) if self.mode != "retrieval" else {}
+            kept = replace(fe, cands=[c for c in fe.cands if c.idx not in verdicts])
+            matched, best = kept.decide(self.s, self.mode, margin)
+            screened = matched
+            if not matched:
+                # Nothing plausible passes: judge the unfiltered winner as before, so a far match that
+                # keeps repeating still reaches the tracker, which restarts there (wrong first lock).
+                matched, best = fe.decide(self.s, self.mode, margin)
+            judged = kept if screened else fe
             distinctive = None
             if self.multi and matched and best is not None:
                 from server.disambiguation import distinctive_support
                 prepared = self._prep(frame_rgb)
-                distinctive = distinctive_support(best, fe.cands,
+                distinctive = distinctive_support(best, judged.cands,
                     {i: v.live_pts for i, v in fe.verifs.items()},
                     (prepared.shape[1], prepared.shape[0]), self.s.N_MIN)
                 if not distinctive["passed"]:
@@ -1038,7 +1095,6 @@ class Localizer:
             if matched and best is not None and pitch_deg is not None and best.pitch is not None:
                 if abs(float(best.pitch) - float(pitch_deg)) > PITCH_GATE_DEG:
                     matched, imu_rejected = False, True
-            still = moving is False
             fix = (self._position_fix(fe, best, frame_rgb.shape)
                    if matched and best is not None and self.mode != "retrieval" else None)
             track = self.tracker.step(self.clock(), moving, self._measurement(best, fix) if matched else None)
@@ -1081,6 +1137,9 @@ class Localizer:
             match_view = self._match_view(fe, best, ref, st.yaw, frame_rgb.shape, position)
             if match_view is not None:
                 match_view["heading_obs"] = heading_observation(matched, best, fix)
+                checked = {c.idx for c in fe.cands}
+                for p in match_view.get("picks", []):
+                    p["verdict"] = verdicts.get(p["ref"]) or ("kept" if p["ref"] in checked else None)
             self.last_debug = {
                 "match": match_view,
                 "position": fix.to_dict() if fix is not None else None,
@@ -1092,7 +1151,8 @@ class Localizer:
                 "imu_pitch": pitch_deg, "imu_roll": roll_deg,
                 "matched": matched, "embed": round(fe.embed_ms, 1), "extract": round(fe.extract_ms, 1),
                 "verify": round(fe.verify_ms, 1), "total": round((time.perf_counter() - t0) * 1000, 1),
-                "candidates": [(c.name, c.place, c.inliers, c.grid) for c in fe.cands],
+                "candidates": [(c.name, c.place, c.inliers, c.grid, verdicts.get(c.idx, "kept")) for c in fe.cands],
+                "screened": screened,
                 "competitor_inliers": fe.best_comp_inliers(), "pending_jump": st.pending_jump,
                 "embedded": embed_now,
                 "reason": localization_reason(fe, self.s, matched, st.state),
@@ -1199,7 +1259,16 @@ class Localizer:
                     top.yaw, top.pitch or 0.0, top.roll or 0.0,
                     self.s.HFOV_DEG, h / max(1, w)
                 )
-            out = {"ranking": ranking, "footprint": footprint,
+            # The embedding's own picks: the reference views with the highest retrieval similarity,
+            # with their verified inliers when geometry checked them (None = not verified).
+            verified = {c.idx: c for c in fe.cands}
+            order = np.argsort(-np.asarray(sims))[:3]
+            picks = [{"ref": int(i), "name": self._refs[i].view.name, "place": self._refs[i].place,
+                      "demo": bool(self._refs[i].demo), "sim": round(float(sims[i]), 4),
+                      "inliers": int(verified[i].inliers) if int(i) in verified else None}
+                     for i in order]
+            out = {"ranking": ranking, "footprint": footprint, "picks": picks,
+                   "best_ref": int(best.idx) if best is not None else None,
                    "pano": top.place if top is not None else None,
                    "pano_inliers": int(top.inliers) if top is not None else 0}
             if position is not None:
