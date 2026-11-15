@@ -378,7 +378,7 @@ def s_demo(prs, assets):
              color=AMBER, name=f"{head} quote")
     shot = assets.get("viewer")
     caption = ("On the laptop: the live camera with detections, which scan matched and how sure, "
-               "position on the floor plan, and every cue that was spoken.")
+               "and every cue that was spoken.")
     text(s, MARGIN, 5.85, 12.1, 0.7, caption, size=16, color=ON_INK, name="Viewer caption")
     notes_extra = "\n\nThe next slide is a viewer screenshot, for when the demo fails." if shot else ""
     text(s, MARGIN, 6.55, 12.1, 0.35, "Cue wording is what the server says today; place names "

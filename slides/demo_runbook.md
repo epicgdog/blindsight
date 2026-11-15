@@ -29,12 +29,12 @@ Everything needed to present Blindsight: the deck, the live demo, and what to do
 ## Starting the demo
 
 1. **Server.** Pick the mode before the demo; they do different things today:
-   - **Property mode** (default): matches against all 66 scans and uses the taught place photos and the scan disambiguation checks. The voice agent cannot tell where you are in this mode, and the floor-plan position stays empty.
-   - **Single mode** (`LOCALIZATION_SCOPE=single`): also matches against every scan (CANDIDATE_PLACES=all), and feeds the voice agent, the IMU check, the place ranking and the floor-plan position. Taught place photos are not used.
+   - **Property mode** (default, recommended for the demo): matches against all 66 scans, uses the taught place photos and the scan disambiguation checks, and (since the voice-agent fix in d0c2542) tells the voice agent where you are. The floor-plan position and the tilt check stay empty.
+   - **Single mode** (`LOCALIZATION_SCOPE=single`): also matches against every scan (CANDIDATE_PLACES=all) and adds the tilt check and the floor-plan position. Taught place photos are not used.
 
    Apple Silicon laptop: `LOCALIZER=real RECORD=1 make server` (add `LOCALIZATION_SCOPE=single` for single mode). Intel Mac: `RECORD=1 make -f make/part3.mk p3-server-lite` (same `LOCALIZATION_SCOPE` choice). Wait for `Server ready`.
 
-   The voice agent needs a Gemini key (GOOGLE_API_KEY in .env.local); without one, skip that beat.
+   The voice agent needs a Gemini key (GOOGLE_API_KEY in .env.local); without one, skip that beat. Check http://localhost:8000/api/agent/health (ready, key configured, ffmpeg) before the demo, and reload the Expo app after pulling the voice-agent fix. Hold the talk button until "Listening" appears before speaking.
 2. **Tunnel.** In a second window, run `cloudflared tunnel --url http://localhost:8000` and leave it open. Type the `https://….trycloudflare.com` address it prints into the phone app and tap Start. Each restart gives a new address.
 3. **Viewer.** Open http://localhost:8000 on the laptop, full screen, next to the deck.
 4. **Phone.** Portrait, 1x, volume up. The app plays through the silent switch.
