@@ -132,7 +132,7 @@ guidance step on its own (default: only obstacle warnings, otherwise it talks wh
 ## Status
 
 Works: localization in the scanned atrium and its corridors (Levels 1 and 2), room search and
-routes on all three levels, voice questions, dropped pins, marking restrooms and fountains.
+routes on all three levels drawn over the walkable floor, the route drawn on the camera image,
+voice questions, dropped pins, marking restrooms and fountains.
 Not yet: your live position below the scan (Level A shows the route and steps, but the dot
-stops at the last scanned spot). Plans for what is next: `NORTH_STAR.md`, `AR_VIEW.MD`,
-`EXTRA_FLOOR.MD`, `OBSTACLE_PATH.MD`.
+stops at the last scanned spot).
