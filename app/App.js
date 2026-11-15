@@ -29,6 +29,8 @@ import { RECORD_MODE, agentQuietUrl, agentTalkUrl, postClip, createHoldToTalk } 
 import NativeNavigation, { trackingModule } from "./NativeNavigation";
 import FlatMap from "./src/FlatMap";
 import VenueMap from "./src/VenueMap";
+import ArOverlay from "./src/ArOverlay";
+import { AR, wrap180 } from "./src/arProject";
 import { distanceText, imageUrl, shownLevel, venueBanner, venueDestUrl, venueInfoUrl, venueMarkUrl, venueRouteUrl,
   venueSearchUrl } from "./src/venue";
 import { BugIcon, CompassIcon, MicIcon, SpeakerIcon, TurnIcon } from "./src/Icons";
@@ -84,6 +86,10 @@ function LegacyApp() {
   const [markNote, setMarkNote] = useState(""); // result of the last "Mark here"
   const [screen, setScreen] = useState("map"); // map (search and plan) | nav (camera with the path)
   const [confirm, setConfirm] = useState(null); // { room, route?, loading? }: picked, before Navigate
+  const [arCam, setArCam] = useState({ heightM: AR.heightM, vfovDeg: AR.vfovDeg }); // tuned on site in the debug sheet
+  const [arCompass, setArCompass] = useState(true); // turn the path with the compass between server frames
+  const lastResultAt = useRef(0);
+  const arRef = useRef({});
 
   useEffect(() => {
     (async () => {
@@ -202,6 +208,7 @@ function LegacyApp() {
           return;
         }
         results += 1;
+        lastResultAt.current = Date.now();
         setResult(r);
         if (r.cue) ackTracker.current.noteCue(r.cue.id, r.seq);
         const loc = r.location ? `${r.location.state} ${r.location.label ?? r.location.pano_id ?? ""}` : null;
@@ -526,6 +533,26 @@ function LegacyApp() {
   const level = shownLevel({ override: levelPick, you: liveVenue?.you, route: vRoute });
   const lv = venueData?.levels?.find((l) => l.id === level) ?? null;
   const miniLv = venueData?.levels?.find((l) => l.id === shownLevel({ override: null, you: liveVenue?.you, route: vRoute })) ?? null;
+  // AR pose: the live room route starts at your (walkable-snapped) position; heading from the
+  // server, turned with the compass since that frame; tilt from the accelerometer. null hides
+  // the path: no fix, a stale one (> 4 s), a rough one (> 2 m), or the route continues on
+  // another level.
+  arRef.current = { route: vRoute, you: liveVenue?.you, facing, sigma: position?.sigma_m, compass: arCompass };
+  const getArPose = useCallback(() => {
+    const a = arRef.current, r = a.route;
+    if (!r?.ok || r.start_assumed || !a.you || Date.now() - lastResultAt.current > 4000) return null;
+    if (Number.isFinite(a.sigma) && a.sigma > 2) return null;
+    const leg = r.legs[0];
+    if (!leg || leg.level !== a.you.level || !(leg.m?.length > 1)) return null;
+    let h = a.facing?.heading_deg;
+    if (!Number.isFinite(h)) return null;
+    if (a.compass && Number.isFinite(a.facing?.compass_deg) && Number.isFinite(heading.current)) {
+      h = (h + wrap180(heading.current - a.facing.compass_deg) + 360) % 360;
+    }
+    const att = attitude.current;
+    return { pos: leg.m[0], pts: leg.m, headingDeg: h, pitchDeg: att?.pitch_deg ?? -15, rollDeg: att?.roll_deg ?? 0,
+      endIsDest: r.legs.length === 1 };
+  }, []);
   const vb = venueBanner(vRoute);
   const b = !running ? { title: "Not started", meters: "", arrow: null, tone: "off" }
     : vb && status.connected ? vb : banner({ connected: status.connected, nav, position });
@@ -548,6 +575,7 @@ function LegacyApp() {
       {screen === "nav" ? (
         <View style={[StyleSheet.absoluteFill, s.camBack]}>
           <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" pictureSize={PICTURE_SIZE} />
+          <ArOverlay width={winW} height={winH} getPose={getArPose} cam={arCam} />
         </View>
       ) : venueData ? (
         <VenueMap lv={lv} uri={imageUrl(normalizeServerUrl(address), lv?.image_url)} route={vRoute} dest={vDest}
@@ -771,6 +799,25 @@ function LegacyApp() {
           <View style={s.toggleRow}>
             <Text style={s.dbg}>Debug dots (scan points, matched place, candidates)</Text>
             <Switch value={debugDots} onValueChange={setDebugDots} />
+          </View>
+          <Text style={s.h}>AR path</Text>
+          <View style={s.toggleRow}>
+            <Text style={s.dbg}>Camera height {arCam.heightM.toFixed(2)} m</Text>
+            <View style={s.markRow}>
+              <Button title="−" onPress={() => setArCam((c) => ({ ...c, heightM: Math.max(0.8, c.heightM - 0.05) }))} />
+              <Button title="+" onPress={() => setArCam((c) => ({ ...c, heightM: Math.min(2, c.heightM + 0.05) }))} />
+            </View>
+          </View>
+          <View style={s.toggleRow}>
+            <Text style={s.dbg}>Field of view {arCam.vfovDeg}° (tall side)</Text>
+            <View style={s.markRow}>
+              <Button title="−" onPress={() => setArCam((c) => ({ ...c, vfovDeg: Math.max(40, c.vfovDeg - 2) }))} />
+              <Button title="+" onPress={() => setArCam((c) => ({ ...c, vfovDeg: Math.min(90, c.vfovDeg + 2) }))} />
+            </View>
+          </View>
+          <View style={s.toggleRow}>
+            <Text style={s.dbg}>Turn the path with the compass between fixes</Text>
+            <Switch value={arCompass} onValueChange={setArCompass} />
           </View>
           <Text style={s.h}>Mark here</Text>
           <View style={s.markRow}>
