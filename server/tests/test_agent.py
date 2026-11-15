@@ -7,9 +7,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.agent import AgentState, LiveAgent, agent_router
-from server.entrance_nav import EntranceGuide, EntranceMap, clear_line, clock, mesh_heading_deg, shortest_path
+from server.entrance_nav import (
+    EntranceGuide,
+    EntranceMap,
+    clear_line,
+    clock,
+    mesh_heading_deg,
+    shortest_path,
+)
 from server.place_window import PlaceWindow, frame_confidence
-from server.protocol import Location
 from server.scene_memory import SceneMemory
 
 
@@ -27,7 +33,7 @@ def test_confidence_rewards_strength_and_punishes_ties():
 
 
 def test_window_decides_after_three_clear_wins_then_holds_then_unknown():
-    w = PlaceWindow()
+    w = PlaceWindow(window_s=5, min_wins=3, margin=1.3)
     for t in (0.0, 1.0):
         assert w.push(t, rank(("a", 125), ("b", 80))).state == "unknown"  # 2 wins: not yet
     d = w.push(2.0, rank(("a", 125), ("b", 80)))  # 125 >= 1.3 x 80: a steady winner decides
@@ -38,7 +44,7 @@ def test_window_decides_after_three_clear_wins_then_holds_then_unknown():
 
 
 def test_window_needs_strength_and_margin():
-    w = PlaceWindow()
+    w = PlaceWindow(margin=1.3)
     for t in range(5):
         d = w.push(float(t), rank(("a", 100), ("b", 90)))  # too close to the runner-up
     assert d.state == "unknown"
@@ -49,7 +55,7 @@ def test_window_needs_strength_and_margin():
 
 
 def test_window_expires_even_when_camera_stops_sending():
-    w = PlaceWindow()
+    w = PlaceWindow(window_s=5)
     for t in (0, 0.5, 1):
         w.push(t, rank(("a", 200)))
     assert w.decide(4).place == "a"
@@ -135,6 +141,7 @@ AT_A = ({"ranking": rank(("a", 200))}, [], {"pano_id": "a", "yaw_deg": 0.0})
 
 def test_frames_emit_guidance_and_close_obstacles(tmp_path):
     state = make_state(tmp_path)
+    state.on_frame(-0.5, *AT_A)  # first vote; the next frame establishes the place
     said = []
     state.emit = lambda text, urgent: said.append((text, urgent))
     state.guide.start("a")
@@ -143,7 +150,7 @@ def test_frames_emit_guidance_and_close_obstacles(tmp_path):
     state.on_frame(0.5, AT_A[0], chair, AT_A[2])
     state.on_frame(1.0, AT_A[0], chair, AT_A[2])  # second frame in a row: urgent event
     state.on_frame(1.5, AT_A[0], chair, AT_A[2])  # not repeated within 6 s
-    assert said == [("[step] Turn right, to your 3 o'clock.", False), ("[urgent] Stop. chair very close, ahead.", True)]
+    assert said == [("[step] Turn right, to your 2 o'clock.", False), ("[urgent] Stop. chair very close, ahead.", True)]
     state.quiet = True
     state.guide.last_text = None  # would speak again, but the user is talking
     assert state.on_frame(2.0, *AT_A) == []
@@ -153,6 +160,7 @@ def test_location_tool_never_guesses(tmp_path):
     state = make_state(tmp_path)
     assert state.tool("get_location", {})["place"] == "unknown"
     state.on_frame(0.0, {"ranking": rank(("d", 200))}, [], {"pano_id": "d", "yaw_deg": 0.0})
+    state.on_frame(0.5, {"ranking": rank(("d", 200))}, [], {"pano_id": "d", "yaw_deg": 0.0})
     out = state.tool("get_location", {})
     assert out["place"] == "the entrance" and out["is_entrance"]
 
@@ -222,6 +230,7 @@ def test_live_agent_talk_calls_tools_and_speaks(tmp_path):
 
     state = make_state(tmp_path)
     state.on_frame(0.0, *AT_A)
+    state.on_frame(0.5, *AT_A)
     session = FakeSession()
     agent = LiveAgent(state, client=fake_client(session))
 
@@ -288,7 +297,8 @@ def test_nav_endpoint_turns_guidance_off_and_on_from_the_decided_place(tmp_path)
     assert off["ok"] and not off["active"] and not state.guide.active and state.guide.status == {"active": False}
     on = c.post("/api/agent/nav?on=1").json()
     assert on["ok"] and on["active"] and state.guide.active
-    assert on["distance_m"] == pytest.approx(9.0)  # planned at once from a: a-b-c-d
+    assert on["distance_m"] == pytest.approx(round(math.hypot(6, 3), 1))  # clear line is straightened
+    assert on["navigation_ready"] and "Turn right" in on["instruction"]
     assert c.post("/api/agent/nav?on=0").json()["active"] is False
 
 

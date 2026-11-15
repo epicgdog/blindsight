@@ -19,7 +19,7 @@ import warnings
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import quote
 
@@ -631,8 +631,11 @@ def create_app(
             import cv2
 
             def encode():
-                ok, buf = cv2.imencode(".jpg", cv2.cvtColor(ref.view.image, cv2.COLOR_RGB2BGR),
-                                       [cv2.IMWRITE_JPEG_QUALITY, 85])
+                ok, buf = cv2.imencode(
+                    ".jpg",
+                    cv2.cvtColor(ref.view.image, cv2.COLOR_RGB2BGR),
+                    [cv2.IMWRITE_JPEG_QUALITY, 85],
+                )
                 if not ok:
                     raise HTTPException(500, "Encode failed")
                 return buf.tobytes()
@@ -641,7 +644,9 @@ def create_app(
             if len(ref_jpegs) >= 512:
                 ref_jpegs.pop(next(iter(ref_jpegs)))
             ref_jpegs[key] = data
-        return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+        return Response(
+            data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"}
+        )
 
     @app.get("/api/camera_meta")
     async def camera_meta():
@@ -746,7 +751,9 @@ def create_app(
                 if raw is None and message.get("text") is not None:
                     if '"camera_meta"' in message["text"][:64]:
                         # Camera metadata sample (EXIF, sizes), every 20th frame: recorded for calibration.
-                        meta = await asyncio.to_thread(save_camera_meta, settings, meta_session, message["text"])
+                        meta = await asyncio.to_thread(
+                            save_camera_meta, settings, meta_session, message["text"]
+                        )
                         if meta is not None:
                             runtime.camera_meta = meta
                         continue
@@ -794,7 +801,10 @@ def create_app(
                 runtime.publish(item)
                 # The per-step debug block (matched points, every candidate) is for viewers only.
                 dbg = item.result.get("localization_debug") or {}
-                phone_result = {**item.result, "localization_debug": {k: v for k, v in dbg.items() if k != "steps"}}
+                phone_result = {
+                    **item.result,
+                    "localization_debug": {k: v for k, v in dbg.items() if k != "steps"},
+                }
                 async with send_lock:
                     await asyncio.wait_for(
                         websocket.send_json(phone_result), settings.send_timeout_s

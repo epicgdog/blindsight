@@ -194,7 +194,12 @@ def test_speech_ack_without_cues(settings, packet):
         assert client.get("/metrics").json()["speech_acknowledged"] is True
         report = {"cue_id": "loc-test", "played": True, "capture_to_audible_ms": 200}
         assert client.post("/api/speech", json=report).status_code == 409
-        assert client.post("/api/speech", json={"played": True, "capture_to_audible_ms": 5}).status_code == 422
+        assert (
+            client.post(
+                "/api/speech", json={"played": True, "capture_to_audible_ms": 5}
+            ).status_code
+            == 422
+        )
 
 
 def test_viewer_assets_and_pano_metadata(settings):

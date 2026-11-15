@@ -75,7 +75,11 @@ def test_rendered_camera_to_location_voice_tools_and_guidance_events(tmp_path, m
                     encode_frame(FrameHeader(seq, seq * 100.0, None, 360, 480), jpeg.getvalue())
                 )
                 seq += 1
-                return phone.receive_json()
+                while True:
+                    message = phone.receive_json()
+                    if message.get("type") == "voice":
+                        continue  # streamed voice and frame results share this socket
+                    return message
 
             for _ in range(4):
                 result = stream("room_p0")

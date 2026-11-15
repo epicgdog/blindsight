@@ -27,13 +27,19 @@ from collections import OrderedDict, deque
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response
 
 from server.cues import HAZARDS
-from server.entrance_nav import EntranceGuide, EntranceMap, describe_route, plan, route_sentence, start_point
+from server.entrance_nav import (
+    EntranceGuide,
+    EntranceMap,
+    describe_route,
+    plan,
+    route_sentence,
+    start_point,
+)
 from server.heading import HeadingKalman, wrap180
-from server.route import TURN_DEG, clock
 from server.place_window import PlaceWindow
+from server.route import TURN_DEG, clock
 from server.scene_memory import SceneMemory
 from server.voice import pcm_to_wav, wav_response
 
@@ -96,9 +102,9 @@ What you are given
   - [arrived] they reached the goal. Celebrate briefly.
   Keep every direction, clock position and distance exactly as given (you may say "about six steps"
   for "about 6 steps"), and never invent a direction, distance or object.
-- Always give distances in the person's steps, never in meters: they can count steps but cannot judge
-  meters without sight. Tool results carry steps (…_steps fields); if one only has meters, convert at
-  about 0.7 m per step.
+- Use the tool's instruction verbatim for movement. Step counts are estimates, never exact counts.
+  Never calculate a distance or convert meters yourself. If navigation_ready is false or ok is false,
+  say the supplied instruction/reason and do not give a walking direction.
 
 Using the tools (silently, then just talk)
 - Where they are: get_location. If unknown, say something like "Hold the phone steady for a second and
@@ -110,10 +116,9 @@ Using the tools (silently, then just talk)
   will follow on its own.
 - "Which way?" / "where do I go?" / "am I facing the right way?": call get_direction and say the turn and
   distance it gives. If it says the direction is rough, say it as approximate ("roughly to your right").
-- The CONTEXT line always carries the path from where they stand to the entrance, worked out from
-  their location and the way they face. When they ask how to get out, how far it is or which way to go,
-  explain it like a person would ("It's about seventeen steps. Turn to your right, walk about seven steps,
-  then a little left and straight to the door."). plan_route gives the same path fresh. Guidance to
+- For every request for directions, call get_direction or start_navigation now, even if you remember
+  a previous answer. Give only its current instruction; do not chain a turn and a walk together.
+  plan_route supplies an overview only when explicitly requested. Guidance to
   the entrance runs on its own from the start; if they said stop and later want to go, use
   start_navigation.
 - "Stop" / "never mind": stop_navigation. "How far?": get_route_status or the context.
@@ -301,8 +306,9 @@ class AgentState:
     def _guide_events(self, t: float, steps: int | None, fresh: bool) -> list[tuple[str, bool]]:
         """Guidance for this instant (caller holds the lock). Frames and IMU samples share it, so both
         tag starts and repeats the same way."""
+        self.decision = self.window.decide(t)
         had_route = self.guide.route is not None
-        nav = self.guide.update(t, self.decision.place, self.decision.state, self.yaw_deg, self.position,
+        nav = self.guide.update(t, self.decision.place, self.decision.state, self._guidance_yaw(t), self.position,
                                 self.heading.estimate.get("heading_deg"), steps=steps, fresh=fresh)
         if not nav:
             return []
@@ -317,9 +323,9 @@ class AgentState:
 
     @staticmethod
     def _deliver(events: list[tuple[str, bool]], emit) -> None:
-        # AGENT_EVENTS: "all" speaks guidance on its own; "urgent" (default) speaks only very close
+        # AGENT_EVENTS: "all" (default) speaks guidance on its own; "urgent" speaks only very close
         # obstacle warnings, so the agent otherwise talks only when the mic is used; "none" is silent.
-        mode = os.environ.get("AGENT_EVENTS", "urgent")
+        mode = os.environ.get("AGENT_EVENTS", "all")
         for text, urgent in events:
             if emit is not None and (mode == "all" or (mode == "urgent" and urgent)):
                 emit(text, urgent)
@@ -383,43 +389,79 @@ class AgentState:
         self._deliver(events, emit)
         return events
 
+    def _guidance_yaw(self, t: float) -> float | None:
+        # A rejected/expired fused heading must not silently fall back to an old frame's yaw.
+        return self.yaw_deg if self.heading.x is None and t - self.t <= IMU_LIVE_S else None
+
     def direction(self) -> dict:
         """Which way to go right now: the next turn and its distance along the route (the guide's
         route while guiding, a fresh one otherwise), plus heading info."""
         with self.lock:
+            now = self.t + time.monotonic() - self._received_at
+            self.decision = self.window.decide(now)
+            self.heading.update_sensors(now, None)
             d, est = self.decision, dict(self.heading.estimate)
+            if d.place is None or d.state == "unknown":
+                self.guide.status = {"active": self.guide.active, "paused": True}
+                return {"ok": False, "navigation_ready": False,
+                        "instruction": "Stop. Hold the phone steady while I find your location.",
+                        "reason": "current location unavailable"}
+            instruction = None
+            if self.guide.active:
+                instruction = self.guide.update(now, d.place, d.state, self._guidance_yaw(now), self.position,
+                                                est.get("heading_deg"), fresh=False)
+            if self.guide.status.get("arrived"):
+                return {"ok": True, "at_destination": True, "navigation_ready": False,
+                        "instruction": "You're at the entrance."}
             guided = self.guide.active and self.guide.route is not None
             nav = dict(self.guide.status)
-            fresh = None if guided else describe_route(self.map, d.place, self.yaw_deg, self.position,
+            fresh = None if guided else describe_route(self.map, d.place, self._guidance_yaw(now), self.position,
                                                        est.get("heading_deg"), stride=self.guide.stride)
         if guided:
             if "next_m" not in nav:
-                return {"ok": False, "say": "Hold the phone steady and I'll find the path."}
+                return {"ok": False, "navigation_ready": False,
+                        "instruction": instruction or "Stop. No route is available from here."}
             turn = nav.get("turn_deg")
-            do_now = ("go straight" if turn is None or abs(turn) <= TURN_DEG else
+            if turn is None:
+                return {"ok": False, "navigation_ready": False,
+                        "instruction": "Stop. Hold the phone facing forward while I determine your heading.",
+                        "reason": "facing direction unavailable"}
+            do_now = ("go straight" if turn is not None and abs(turn) <= TURN_DEG else
                       f"turn {'right' if turn > 0 else 'left'} to your {clock(turn)} o'clock")
             out = {"ok": True, "do_now": do_now, "then_walk_m": nav["next_m"], "next_turn": nav["next"],
                    "next_turn_in_m": nav["next_m"], "remaining_m": nav["remaining_m"],
+                   "then_walk_steps": nav.get("next_steps"),
                    "next_turn_in_steps": nav.get("next_steps"), "remaining_steps": nav.get("remaining_steps")}
         else:
             if not fresh.get("ok"):
-                return {**fresh, "say": "Hold the phone steady and I'll find the path."}
+                return {**fresh, "navigation_ready": False,
+                        "instruction": "Stop. " + fresh["reason"] + "."}
             if fresh.get("at_destination"):
-                return {"ok": True, "at_destination": True}
+                return {"ok": True, "at_destination": True, "navigation_ready": False,
+                        "instruction": "You're at the entrance."}
+            if not fresh.get("heading_known"):
+                return {"ok": False, "navigation_ready": False,
+                        "instruction": "Stop. Hold the phone facing forward while I determine your heading.",
+                        "reason": "facing direction unavailable"}
             leg = fresh["legs"][0]
             out = {"ok": True, "do_now": leg["do"], "then_walk_m": leg["meters"], "then_walk_steps": leg.get("steps"), "next_turn": fresh["next_turn"],
                    "next_turn_in_m": fresh["next_turn_in_m"], "remaining_m": fresh["total_m"]}
-        out.update(heading_source=est.get("source"), heading_accuracy_deg=est.get("sigma_deg"))
+        out.update(navigation_ready=True, steps_estimated=True,
+                   instruction=instruction or (f"{out['do_now'].capitalize()}." if out['do_now'] != "go straight"
+                                                else f"Go straight about {out['then_walk_steps']} steps."),
+                   heading_source=est.get("source"), heading_accuracy_deg=est.get("sigma_deg"))
         if est.get("heading_deg") is None:
-            out["note"] = "facing direction unknown: ask them to hold the phone up, facing forward, and turn slowly"
+            out["heading_source"] = "recent_visual_yaw"
+            out["note"] = "facing direction is from a recent camera frame; say the direction as approximate"
         elif (est.get("sigma_deg") or 0) >= 20:
-            out["note"] = "facing direction is rough; say the direction as approximate"
+            out["note"] = "facing direction is approximate: say 'roughly' but retain the instruction's clock position"
         return out
 
     def context_line(self) -> str:
         """What the agent should know when the person speaks: view, recent objects, place, goal."""
+        direction = self.direction()
         with self.lock:
-            d, mem, nav = self.decision, self.memory.summary(self.t, self.place_label), dict(self.guide.status)
+            d, mem, nav = self.decision, self.tool("get_surroundings", {}), dict(self.guide.status)
         now = "; ".join(mem["now"]) or "nothing detected"
         recent = "; ".join(f"{r['object']} {r['seconds_ago']} s ago ({r['last_direction']})" for r in mem["recent"][:8])
         place = (f"{self.place_label(d.place)} (confidence {d.conf:.2f}"
@@ -439,8 +481,10 @@ class AgentState:
         facing = ("unknown" if est.get("heading_deg") is None else
                   f"known from {est['source']}, about ±{est['sigma_deg']:g} deg")
         with self.lock:
-            route = route_sentence(describe_route(self.map, d.place, self.yaw_deg, self.position, self.heading.estimate.get("heading_deg"), stride=self.guide.stride))
-        return f"CONTEXT: Path to the entrance from here: {route}. In view now: {now}. Seen in the last minute: {recent or 'nothing'}. Place: {place}. Facing direction: {facing}. Goal: {goal}."
+            route = route_sentence(describe_route(self.map, d.place, self._guidance_yaw(self.t + time.monotonic() - self._received_at), self.position, self.heading.estimate.get("heading_deg"), stride=self.guide.stride))
+        if not direction.get("navigation_ready"):
+            route = direction["instruction"]
+        return f"CONTEXT: Current instruction: {direction['instruction']} Path to the entrance from here: {route}. In view now: {now}. Seen in the last minute: {recent or 'nothing'}. Place: {place}. Facing direction: {facing}. Goal: {goal}."
 
     def snapshot(self) -> dict:
         with self.lock:
@@ -487,18 +531,33 @@ class AgentState:
                 result["recent"] = [r for r in result["recent"] if r["seconds_ago"] <= 60]
                 return result
             if name == "start_navigation":
-                dest = str(args.get("destination") or "entrance").lower()
-                if "entr" not in dest and "door" not in dest and "exit" not in dest and "out" not in dest:
+                dest = str(args.get("destination") or "entrance").strip().lower()
+                if dest not in {"entrance", "the entrance", "main entrance", "front entrance",
+                                "door", "the door", "front door", "exit", "the exit", "out", "outside"}:
                     return {"ok": False, "reason": "only the entrance is supported"}
-                return self.guide.start(d.place)
+                result = self.guide.start(d.place, self.position if d.place else None)
+                if not result.get("ok"):
+                    return result
+                direction = self.direction()
+                return {**result, "direction": direction,
+                        "navigation_ready": direction.get("navigation_ready", False),
+                        "instruction": direction["instruction"]}
             if name == "stop_navigation":
                 return self.guide.stop()
             if name == "get_route_status":
-                return dict(self.guide.status)
+                direction = self.direction()
+                status = dict(self.guide.status) if direction.get("navigation_ready") else {
+                    "active": self.guide.active, "paused": not direction.get("at_destination", False),
+                    "arrived": direction.get("at_destination", False)}
+                return {**status, "direction": direction, "instruction": direction["instruction"]}
             if name == "get_direction":
                 return self.direction()
             if name == "plan_route":
-                return describe_route(self.map, d.place, self.yaw_deg, self.position, self.heading.estimate.get("heading_deg"), stride=self.guide.stride)
+                direction = self.direction()
+                return {**describe_route(self.map, d.place, self._guidance_yaw(self.t + time.monotonic() - self._received_at), self.position,
+                                         self.heading.estimate.get("heading_deg"), stride=self.guide.stride),
+                        "navigation_ready": direction.get("navigation_ready", False),
+                        "instruction": direction["instruction"]}
             jpeg = self.jpeg
         if name == "describe_view":
             if jpeg is None or describe is None:
@@ -784,7 +843,7 @@ def agent_router(get_agent) -> APIRouter:
                 pcm = await asyncio.to_thread(to_pcm16k, data)
             except (OSError, subprocess.SubprocessError) as ex:
                 raise HTTPException(422, "Audio clip could not be decoded") from ex
-            agent.state.quiet = False
+            agent.state.quiet = True  # normal guidance must not compete with this answer
             try:
                 return await asyncio.wait_for(agent.talk(pcm), timeout=45)
             except Exception as ex:  # noqa: BLE001 - the phone always gets an answer
@@ -793,6 +852,8 @@ def agent_router(get_agent) -> APIRouter:
                 msg = str(ex)
                 return {"heard": "", "reply": "", "tools": [], "error": type(ex).__name__,
                         "detail": "out of credit" if ("RESOURCE_EXHAUSTED" in msg or "402" in msg) else msg[:200]}
+            finally:
+                agent.state.quiet = False
 
     @router.post("/quiet")
     async def quiet(on: bool = True):
@@ -809,8 +870,7 @@ def agent_router(get_agent) -> APIRouter:
                 out = state.guide.stop()
             else:
                 # Same as the start_navigation tool: plan from the place decided right now.
-                state.decision = state.window.decide(state.t + time.monotonic() - state._received_at)
-                out = state.guide.start(state.decision.place)
+                out = state.tool("start_navigation", {"destination": "entrance"})
             return {**out, "active": state.guide.active}
 
     @router.get("/clip/{clip_id}")

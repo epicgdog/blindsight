@@ -1,5 +1,44 @@
 # Handoff: Gemini Live voice agent (2026-11-14, evening session)
 
+## November 15 voice-direction repair
+
+Navigation tools now return a current `instruction` and `navigation_ready` flag.
+Starting a route supplies the first turn and estimated step counts immediately,
+using the tracked position. Unknown/expired position or heading produces a stop
+instruction. IMU packets cannot keep a lost visual position alive. An expired
+heading filter no longer falls back to an old camera yaw. Unsupported destinations
+are rejected explicitly; this guide currently supports the entrance only.
+
+Normal guidance events default to enabled. If an existing shell sets
+`AGENT_EVENTS=urgent` or `none`, run with `AGENT_EVENTS=all` to hear subsequent
+instructions without pressing the microphone again. Normal events are muted while
+a voice request is being answered; urgent events can still interrupt.
+
+Pull main and restart the serving FastAPI process. `/api/agent/state` must show a
+known place and usable heading during a walk; a healthy Gemini connection alone
+cannot supply either. At inspection the public service reported unknown place and
+no heading. Test on the phone with camera streaming in the mapped space.
+
+Real Gemini Live checks with simulated map/position: a spoken entrance request
+called `start_navigation`, received the computed two-o'clock right turn and ten
+estimated remaining steps, and returned audio in about 6.9 seconds. After location
+was removed, the next spoken request returned a hold-position answer and no walking
+direction in about 4.3 seconds. These are backend simulations, not physical route
+or iPhone microphone/speaker acceptance. Gemini phrasing remains generative; do not
+interpret these two successful requests as proof of every possible spoken reply.
+
+Verification: final voice/routing/heading/server acceptance run: **121 passed,
+1 skipped** (missing ignored Matterport wall asset). Phone voice/recording unit
+tests: **19 passed**. The full regression snapshot ran 478 tests: 470 passed,
+7 failed, 1 skipped. One failure was the new event test using a moving-phone
+noise model for a stationary-phone scenario; it was corrected and passes in the
+final acceptance run. The remaining failures cover place switching, camera EXIF
+expectations, and removed viewer panels/browser assertions. An untouched checkout
+of `3a5902e` reproduces the place-switching failure, both missing-panel failures,
+and the camera EXIF mismatch; viewer implementation/tests are unchanged here.
+The combined JavaScript run reports 153 passed, 1 failed (that EXIF expectation).
+Do not report the full suite or independent-navigation readiness as passing.
+
 Where the voice agent work stopped. The older integration notes from the part owners follow
 below the line, unchanged.
 

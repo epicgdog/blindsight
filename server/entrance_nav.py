@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 
 from server.minimap import scan_points
-from server.route import STRIDE_M, AROUND_DEG, TURN_DEG, Progress, Route, clock, turn_between
+from server.route import AROUND_DEG, STRIDE_M, TURN_DEG, Progress, Route, clock, turn_between
 
 MAX_EDGE_M = 4.0
 FALLBACK_EDGE_M = 6.0
@@ -122,7 +122,7 @@ def shortest_path(graph: dict, start: str, goal: str) -> tuple[list[str], float]
     return None
 
 
-def start_point(emap: "EntranceMap", place: str, position: dict | None) -> tuple[tuple[float, float], str]:
+def start_point(emap: EntranceMap, place: str, position: dict | None) -> tuple[tuple[float, float], str]:
     """Where the person stands (xy) and the map node to route from.
 
     The Kalman-tracked position wins when its sigma is at most TRACK_SIGMA_M; the route then starts
@@ -182,7 +182,7 @@ def straighten(coords: list, walls: np.ndarray) -> list:
     return out
 
 
-def plan(emap: "EntranceMap", xy, node: str) -> Route | None:
+def plan(emap: EntranceMap, xy, node: str) -> Route | None:
     """Route from xy (standing next to map node `node`) to the entrance, or None if unreachable.
     The scan point path is straightened: it bends only where walls are in the way."""
     found = shortest_path(emap.graph, node, emap.goal)
@@ -214,7 +214,7 @@ class EntranceMap:
         return [n for n in self.points if shortest_path(self.graph, n, goal) is None]
 
     @classmethod
-    def load(cls, data_dir: Path, goal: str | None, goal_label: str = "the entrance") -> "EntranceMap":
+    def load(cls, data_dir: Path, goal: str | None, goal_label: str = "the entrance") -> EntranceMap:
         data_dir = Path(data_dir)
         sp = scan_points(data_dir)
         pts = [p for p in sp["points"] if p.get("floor") == 0]
@@ -235,7 +235,7 @@ class EntranceMap:
 
 def _first_do(route: Route, heading: float | None) -> str:
     if heading is None:
-        return "turn slowly in place until told to go"
+        return "stop and hold the phone facing forward while heading is determined"
     turn = turn_between(heading, route.bearings[0])
     if abs(turn) <= TURN_DEG:
         return "go straight"
@@ -318,7 +318,7 @@ class EntranceGuide:
         self.reminded = False
         self.status: dict = {"active": False}
 
-    def start(self, start_place: str | None) -> dict:
+    def start(self, start_place: str | None, position: dict | None = None) -> dict:
         if self.map.goal not in self.map.points:
             return {"ok": False, "reason": "no entrance configured on this floor"}
         self.active = True
@@ -326,7 +326,7 @@ class EntranceGuide:
         self.route, self.progress = None, None
         out = {"ok": True, "destination": self.map.goal_label}
         if start_place is not None and start_place in self.map.points:
-            self._plan(*start_point(self.map, start_place, None))
+            self._plan(*start_point(self.map, start_place, position))
         self.status = {"active": True}
         if self.route is not None:
             out.update(waypoints=len(self.route.turns), distance_m=round(self.route.length, 1))
@@ -427,7 +427,7 @@ class EntranceGuide:
                 return f"In about {steps_text(d, self.stride)}, {m.say}."
             return None
         if heading is None:
-            return "Turn slowly in place until I tell you to go."
+            return "Stop. Hold the phone facing forward while I determine your heading."
         turn = turn_between(heading, self._target(s))
         turned = TURN_DEG + 1  # unknown start heading: judge the turn as done
         if self.phase == "turn" and self.turn_from is not None:
