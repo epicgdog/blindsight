@@ -169,3 +169,44 @@ function wallMarkers(map, activeId, ranking, trail) {
     otherFloor,
   };
 }
+
+// ---- 3D map: scan points at their real heights, walls extruded from the mesh outline ----
+// Matterport frame: x, y on the floor plane (meters), z up. Scan points sit at camera
+// height, so the floor under floor N is its mean point height minus this (an assumption,
+// not read from the API).
+export const CAM_HEIGHT_M = 1.4;
+export const WALL_HEIGHT_M = 2.5;
+// Scan point at the building entrance (scan 28), found by standing at the door with the phone.
+export const ENTRANCE_ID = "n0ppizy9u8xcadypd2bawceyc";
+
+export function scene3d(map, activeId, ranking, trail) {
+  if (!map?.points?.length) return null;
+  const ranked = (ranking ?? []).map((r) => r.place);
+  const activePoint = map.points.find((p) => p.id === activeId);
+  const estimateId = activePoint ? null : ranked[0] ?? null;
+  const focus = map.points.find((p) => p.id === (activeId ?? estimateId)) ?? null;
+  const points = map.points.map((p) => {
+    let kind = "point";
+    if (p.id === activeId) kind = "active";
+    else if (p.id === estimateId) kind = "estimate";
+    else if (ranked.slice(0, 3).includes(p.id)) kind = "candidate";
+    else if ((trail ?? []).includes(p.id)) kind = "trail";
+    const out = { id: p.id, kind, x: p.x, y: p.y, z: p.z, floor: p.floor ?? 0, rank: ranked.indexOf(p.id) + 1 };
+    if (p.id === ENTRANCE_ID) out.label = "Entrance";
+    return out;
+  });
+  const floors = (map.floors ?? []).map((f) => ({ floor: f.floor, base_z: +(f.z - CAM_HEIGHT_M).toFixed(2) }));
+  const ground = floors.find((f) => f.floor === 0)?.base_z ?? Math.min(...map.points.map((p) => p.z)) - CAM_HEIGHT_M;
+  const here = points.filter((p) => p.floor === 0);
+  const cx = here.reduce((s, p) => s + p.x, 0) / (here.length || 1);
+  const cy = here.reduce((s, p) => s + p.y, 0) / (here.length || 1);
+  return {
+    points,
+    floors,
+    walls: (map.walls ?? []).map((w) => w.slice(0, 4)),
+    ground_z: ground,
+    wall_height: WALL_HEIGHT_M,
+    center: { x: +cx.toFixed(2), y: +cy.toFixed(2), z: +(ground + 1).toFixed(2) },
+    focus: focus ? { id: focus.id, name: scanName(focus), floor: focus.floor ?? 0, otherFloor: focus.floor !== 0 } : null,
+  };
+}

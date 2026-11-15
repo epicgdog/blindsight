@@ -60,3 +60,11 @@ h2 { margin:0 0 6px; font-size:22px; }
 #mm-place { font-size:26px; font-weight:700; margin-top:6px; min-height:34px; }
 .mm-walls { fill:none; stroke:#aab4cc; stroke-width:2; vector-effect:non-scaling-stroke; stroke-linecap:round; }
 .mm-dot.mm-estimate { fill:#f5a52455; stroke:var(--warn); stroke-width:4; }
+
+/* 3D map: shown instead of the 2D minimap when WebGL works; the SVG stays in the DOM as the fallback */
+#map3d { display:none; width:100%; height:420px; background:#222633; border-radius:8px; overflow:hidden; }
+#map3d canvas { display:block; touch-action:none; cursor:grab; }
+#map3d canvas:focus-visible { outline:3px solid var(--warn); outline-offset:-3px; }
+#mini-panel.is3d #map3d { display:block; }
+#mini-panel.is3d #minimap { display:none; }
+#mm-toggle { font-size:16px; margin-left:8px; padding:2px 12px; }

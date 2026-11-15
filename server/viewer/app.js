@@ -1,7 +1,7 @@
-import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, footprintPaths, mapMarkers, pushTrail, yawText, errorText } from "./logic.js";
+import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, footprintPaths, mapMarkers, scene3d, pushTrail, yawText, errorText } from "./logic.js";
 
 const $ = (id) => document.getElementById(id);
-let history = [], cueLog = [], times = [], faces = [], placeInfo = {}, mapPano = null, mapData = null, trail = [], lastResult = null;
+let history = [], cueLog = [], times = [], faces = [], placeInfo = {}, mapPano = null, mapData = null, trail = [], lastResult = null, map3d = null, view3d = true;
 
 function render(r) {
   lastResult = r;
@@ -116,10 +116,28 @@ function renderMinimap(r) {
     nodes.push(c);
   }
   svg.replaceChildren(...nodes);
+  if (map3d) {
+    map3d.update(scene3d(mapData, active, r.match?.ranking, trail));
+    $("mini-panel").classList.toggle("is3d", view3d);
+  }
   $("mm-floor").textContent = floor == null ? "" : `Floor ${floor + 1}`;
   const tag = otherFloor ? " (another floor)" : active ? "" : name ? " (estimate)" : "";
   $("mm-place").textContent = name ? `${name}${tag}` : "";
 }
+
+// 3D map is optional: no WebGL or a load failure leaves the 2D minimap in place.
+import("/viewer/map3d.js").then((m) => {
+  map3d = m.createMap3d($("map3d"));
+  if (!map3d) return;
+  $("mm-toggle").hidden = false;
+  $("mm-toggle").onclick = () => {
+    view3d = !view3d;
+    $("mm-toggle").textContent = view3d ? "Show 2D" : "Show 3D";
+    $("mini-panel").classList.toggle("is3d", view3d);
+    if (view3d) map3d.redraw();
+  };
+  if (lastResult) renderMinimap(lastResult);
+}).catch(() => {});
 
 function renderRefs(best) {
   const strip = $("ref-strip"); strip.replaceChildren();

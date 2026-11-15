@@ -52,3 +52,42 @@ test("ref strip matches face names like face_2", () => {
   assert.deepEqual(refStrip(urls, "/pano/face_1.jpg").map((r) => r.highlight), [false, true, false]);
   assert.deepEqual(refStrip(urls, 0).map((r) => r.highlight), [true, false, false]);
 });
+
+import { scene3d, CAM_HEIGHT_M, ENTRANCE_ID } from "../logic.js";
+
+test("scene3d keeps real heights, marks the active and estimate points, and places the floor", () => {
+  const map = {
+    points: [
+      { id: "a", x: 0, y: 0, z: 1.5, floor: 0, room: "Hallway" },
+      { id: "b", x: 4, y: 2, z: 1.5, floor: 0 },
+      { id: "c", x: 1, y: 1, z: 5.2, floor: 1 },
+    ],
+    floors: [{ floor: 0, z: 1.5, count: 2 }, { floor: 1, z: 5.2, count: 1 }],
+    walls: [[0, 0, 4, 0, 99]],
+  };
+  const s = scene3d(map, "a", [{ place: "b" }], ["b"]);
+  assert.equal(s.points.find((p) => p.id === "a").kind, "active");
+  assert.equal(s.points.find((p) => p.id === "c").z, 5.2);
+  assert.equal(s.ground_z, +(1.5 - CAM_HEIGHT_M).toFixed(2));
+  assert.deepEqual(s.walls, [[0, 0, 4, 0]]);
+  assert.deepEqual(s.center, { x: 2, y: 1, z: +(1.5 - CAM_HEIGHT_M + 1).toFixed(2) });
+  assert.deepEqual(s.focus, { id: "a", name: "Hallway", floor: 0, otherFloor: false });
+  const est = scene3d(map, null, [{ place: "c" }], []);
+  assert.equal(est.points.find((p) => p.id === "c").kind, "estimate");
+  assert.equal(est.focus.otherFloor, true);
+  assert.equal(scene3d({ points: [] }, null, [], []), null);
+});
+
+test("scene3d labels the entrance scan point and only that one", () => {
+  const map = {
+    points: [
+      { id: ENTRANCE_ID, x: -10.9, y: -4.1, z: 1.37, floor: 0 },
+      { id: "b", x: 4, y: 2, z: 1.5, floor: 0 },
+    ],
+    floors: [{ floor: 0, z: 1.5, count: 2 }],
+    walls: [],
+  };
+  const s = scene3d(map, null, [], []);
+  assert.equal(s.points.find((p) => p.id === ENTRANCE_ID).label, "Entrance");
+  assert.equal(s.points.find((p) => p.id === "b").label, undefined);
+});
