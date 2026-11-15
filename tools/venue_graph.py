@@ -154,7 +154,7 @@ CORRIDORS = {
         ["w_s", "s_atr", "se", "s_wc", "s_east", "l_w171", "l_elev", "l_144", "l_stair", "l_east"],
         ["ne", "e_atr", "se"],
         ["ew_n", "n_east", "s_east", "ew_s"],
-        ["w_atr", "atr_w", "atr", "e_atr"], ["n_atr", "atr", "s_atr"], ["atr", "atr_stair"],
+        ["w_atr", "atr_w", "atr"], ["n_atr", "atr", "s_atr"], ["atr", "atr_stair"],
         ["l_w171", "las_w", "las_atr", "las_cafe"],
         ["l_east", "las_e161"],
         ["n_stair", "stair_n"], ["l_elev", "elev"], ["l_stair", "stair_las"],

@@ -34,7 +34,11 @@ VENUE = ROOT / "server" / "venue"
 SCAN_FLOOR = {"1": 2, "2": 3}
 # Holes drawn on the plans (X or "open to below") outside the scan, plan pixels
 VOIDS = {
-    "1": [[(838, 382), (868, 382), (868, 416), (838, 416)]],  # LAS, "open to below"
+    "1": [[(838, 382), (868, 382), (868, 416), (838, 416)],  # LAS, "open to below"
+          # X-marked openings around the JRR atrium (117): two on the west side, a strip on the east
+          [(424, 386), (443, 386), (443, 417), (424, 417)],
+          [(424, 455), (443, 455), (443, 489), (424, 489)],
+          [(566, 386), (586, 386), (586, 492), (566, 492)]],
     "2": [[(652, 562), (748, 562), (748, 668), (674, 668), (674, 646), (652, 646)]],  # LAS atrium, X
     # JRR west areaway and the terrace south of it: outlines on the plan, not rooms or corridors
     "A": [[(198, 300), (272, 300), (272, 712), (198, 712)], [(198, 712), (398, 712), (398, 792), (198, 792)]],
