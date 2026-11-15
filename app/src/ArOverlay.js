@@ -30,12 +30,13 @@ export default function ArOverlay({ width, height, getPose, cam }) {
   if (s.head == null) s.head = pose.headingDeg;
   else s.head = (s.head + wrap180(pose.headingDeg - s.head) * (1 - Math.exp(-HEAD_RATE * dt)) + 360) % 360;
 
-  const sc = arScene({ route: pose.pts, pos: s.pos, headingDeg: s.head, endIsDest: pose.endIsDest,
+  const sc = arScene({ route: pose.pts, pos: s.pos, headingDeg: s.head, endIsDest: pose.endIsDest, obstacles: pose.obstacles,
     cam: { ...cam, width, height, pitchDeg: pose.pitchDeg, rollDeg: pose.rollDeg } });
   const hint = { left: "◀  Turn left", right: "Turn right  ▶", behind: "Turn around" }[sc.hint];
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       <Svg width={width} height={height} style={StyleSheet.absoluteFill}>
+        {sc.rings.map((r, i) => <Polygon key={`r${i}`} points={pts(r.pts)} fill="#d93025" fillOpacity={0.3} stroke="#d93025" strokeWidth={3} />)}
         {sc.quads.map((q, i) => <Polygon key={`q${i}`} points={pts(q.pts)} fill="#1a73e8" fillOpacity={q.alpha} />)}
         {sc.chevrons.map((c, i) => <Polygon key={`c${i}`} points={pts(c.pts)} fill="#ffffff" fillOpacity={0.9} />)}
         {sc.pin ? <Line x1={sc.pin.base[0]} y1={sc.pin.base[1]} x2={sc.pin.top[0]} y2={sc.pin.top[1]} stroke="#d93025" strokeWidth={4} /> : null}

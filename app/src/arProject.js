@@ -99,9 +99,10 @@ function samples(pts, step) {
 // Everything to draw for one camera pose:
 //   quads: ribbon pieces [{ pts: 4 screen points, alpha }], chevrons: [{ pts }],
 //   pin: { base, top } at the destination when it is within reach, corner: turn ahead or null,
-//   hint: "left" | "right" | "behind" when the path is out of view, else null.
-export function arScene({ route, pos, headingDeg, cam, endIsDest = true, o = AR }) {
-  const empty = { quads: [], chevrons: [], pin: null, corner: null, hint: null };
+//   hint: "left" | "right" | "behind" when the path is out of view, else null,
+//   rings: detected obstacles as floor circles [{ pts }] (obstacles: [{ x, y, r_m }] map metres).
+export function arScene({ route, pos, headingDeg, cam, endIsDest = true, obstacles = [], o = AR }) {
+  const empty = { quads: [], chevrons: [], pin: null, corner: null, hint: null, rings: [] };
   const ahead = pathAhead(route, pos, o);
   if (!ahead || !Number.isFinite(headingDeg)) return empty;
   const P = (p, up = 0) => { const c = toCamera(p, pos, headingDeg); return project(c.f, c.r, up, cam); };
@@ -131,5 +132,14 @@ export function arScene({ route, pos, headingDeg, cam, endIsDest = true, o = AR 
   const bearing = deg(Math.atan2(t.r, t.f));
   const halfH = deg(Math.atan(cam.width / 2 / focalPx(cam.height, cam.vfovDeg ?? o.vfovDeg)));
   const hint = Math.abs(bearing) > 120 ? "behind" : Math.abs(bearing) > halfH ? (bearing > 0 ? "right" : "left") : null;
-  return { quads, chevrons, pin, corner: ahead.corner, hint };
+  const rings = [];
+  for (const ob of obstacles ?? []) {
+    const r = ob.r_m ?? 0.4, ring = [];
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * 2 * Math.PI;
+      ring.push(P([ob.x + r * Math.cos(a), ob.y + r * Math.sin(a)]));
+    }
+    if (ring.every(Boolean)) rings.push({ pts: ring, cls: ob.cls });
+  }
+  return { quads, chevrons, pin, corner: ahead.corner, hint, rings };
 }

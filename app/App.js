@@ -542,7 +542,8 @@ function LegacyApp() {
   // server, turned with the compass since that frame; tilt from the accelerometer. null hides
   // the path: no fix, a stale one (> 4 s), a rough one (> 2 m), or the route continues on
   // another level.
-  arRef.current = { route: vRoute, you: liveVenue?.you, facing, sigma: position?.sigma_m, compass: arCompass };
+  arRef.current = { route: vRoute, you: liveVenue?.you, facing, sigma: position?.sigma_m, compass: arCompass,
+    obstacles: liveVenue?.obstacles ?? [] };
   const getArPose = useCallback(() => {
     const a = arRef.current, r = a.route;
     if (!r?.ok || r.start_assumed || !a.you || Date.now() - lastResultAt.current > 4000) return null;
@@ -556,7 +557,7 @@ function LegacyApp() {
     }
     const att = attitude.current;
     return { pos: leg.m[0], pts: leg.m, headingDeg: h, pitchDeg: att?.pitch_deg ?? -15, rollDeg: att?.roll_deg ?? 0,
-      endIsDest: r.legs.length === 1 };
+      endIsDest: r.legs.length === 1, obstacles: a.obstacles.filter((o) => o.level === a.you.level) };
   }, []);
   const vb = venueBanner(vRoute);
   const b = !running ? { title: "Where do you want to go?", meters: "", arrow: null, tone: "off" }
@@ -584,7 +585,7 @@ function LegacyApp() {
         </View>
       ) : venueData ? (
         <VenueMap lv={lv} uri={imageUrl(normalizeServerUrl(address), lv?.image_url)} route={vRoute} dest={vDest}
-          you={liveVenue?.you} headingDeg={facing?.heading_deg}
+          you={liveVenue?.you} headingDeg={facing?.heading_deg} obstacles={liveVenue?.obstacles}
           insetTop={TOP + 64} insetBottom={debugOpen ? sheetH + 8 : BOTTOM + BAR_H + 8}
           entrancePath={path} pin={path?.goal_kind === "pin" ? path.goal : null}
           pinDraft={pinDraft?.ok || pinDraft?.loading ? pinDraft : null} onTapMap={pinMode && status.connected ? onTapMap : null} />
@@ -659,7 +660,7 @@ function LegacyApp() {
           accessibilityRole="button" accessibilityLabel="Show the full map">
           <VenueMap compact={{ width: MINI, height: MINI, spanPx: 240 }} lv={miniLv}
             uri={imageUrl(normalizeServerUrl(address), miniLv?.image_url)} route={vRoute} dest={vDest}
-            you={liveVenue?.you} headingDeg={facing?.heading_deg} />
+            you={liveVenue?.you} headingDeg={facing?.heading_deg} obstacles={liveVenue?.obstacles} />
         </Pressable>
       ) : null}
 

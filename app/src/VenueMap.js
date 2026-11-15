@@ -135,7 +135,7 @@ function PinMark({ x, y, color = "#d93025" }) {
 // compact: { width, height, spanPx } draws a small map (the minimap on the camera screen),
 // zoomed to spanPx plan pixels across, centred on you (else the route start, else the room).
 export default function VenueMap({ uri, lv, route, dest, you, headingDeg, insetTop = 0, insetBottom = 0, onTapMap,
-  entrancePath, pin, pinDraft, compact }) {
+  entrancePath, pin, pinDraft, compact, obstacles }) {
   const { height: winH } = useWindowDimensions();
   const [box, setBox] = useState(null);
   const boxRef = useRef(null);
@@ -187,6 +187,9 @@ export default function VenueMap({ uri, lv, route, dest, you, headingDeg, insetT
       viewBox={viewBox} preserveAspectRatio="xMidYMid meet">
       {arrow ? <Line x1={dot[0]} y1={dot[1]} x2={arrow.tip[0]} y2={arrow.tip[1]} stroke="#1a73e8" strokeWidth={4} /> : null}
       {arrow ? <Polygon points={arrow.head} fill="#1a73e8" /> : null}
+      {(obstacles ?? []).filter((o) => o.level === lv.id && o.px).map((o, i) => (
+        <Circle key={`o${i}`} cx={o.px[0]} cy={o.px[1]} r={Math.max(5, o.r_px ?? 4)} fill="rgba(217,48,37,0.35)" stroke="#d93025" strokeWidth={2} />
+      ))}
       {dot ? <Circle cx={dot[0]} cy={dot[1]} r={8} fill="#1a73e8" stroke="#fff" strokeWidth={3} /> : null}
     </Svg>
   );
