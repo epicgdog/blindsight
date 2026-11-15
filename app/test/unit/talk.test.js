@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MIN_CLIP_MS, RECORD_MODE, agentTalkUrl, postClip } from "../../src/talk.js";
+import { MIN_CLIP_MS, RECORD_MODE, agentTalkUrl, postClip, createHoldToTalk } from "../../src/talk.js";
 
 test("agent url follows the websocket scheme and host", () => {
   assert.equal(agentTalkUrl("wss://box.ts.net/ws/phone"), "https://box.ts.net/api/agent/talk");
@@ -36,5 +36,35 @@ test("postClip always has something to say on failure", async () => {
   const down = await postClip(async () => { throw new Error("offline"); }, "u", "f", { FormDataCtor: FakeForm });
   assert.match(down.reply, /can't reach/);
   const bad = await postClip(async () => ({ ok: false, status: 503 }), "u", "f", { FormDataCtor: FakeForm });
-  assert.match(bad.reply, /problem/);
+  assert.match(bad.reply, /not ready/);
+});
+
+test("timeout is reported separately from network failure", async () => {
+  const out = await postClip(async () => { throw {name: "AbortError"}; }, "u", "f", {FormDataCtor: FakeForm});
+  assert.match(out.reply, /took too long/);
+});
+
+test("release waits for recorder preparation and never stops an unstarted recorder", async () => {
+  let ready, clock = 0; const events = [];
+  const controller = createHoldToTalk({
+    prepare: () => new Promise(r => ready = r), record: () => events.push("record"),
+    finish: async () => { events.push("stop"); return "file"; }, restore: async () => {},
+    send: async () => { events.push("upload"); return {reply:"answer"}; },
+    announce: text => events.push(text), state() {}, busy() {}, now: () => clock,
+  });
+  controller.begin(); const end = controller.end();
+  assert.deepEqual(events, []); ready(); await end;
+  assert.deepEqual(events, ["record", "stop"]); // early release is a short clip, not corrupt audio
+});
+
+test("one recording and upload at a time; restore playback before response", async () => {
+  let clock = 0, upload; const events = [];
+  const controller = createHoldToTalk({prepare: async()=>{}, record:()=>events.push("record"),
+    finish:async()=>"file", restore:async()=>events.push("restore"),
+    send:()=>new Promise(r=>upload=r), announce:()=>events.push("reply"), state(){},busy(){},now:()=>clock});
+  controller.begin(); await new Promise(r=>setTimeout(r,0)); clock=1000;
+  const end=controller.end(); await new Promise(r=>setTimeout(r,0)); controller.begin();
+  assert.equal(events.filter(x=>x==="record").length,1);
+  upload({reply:"answer"}); await end;
+  assert.ok(events.indexOf("restore") < events.indexOf("reply"));
 });

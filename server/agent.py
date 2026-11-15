@@ -113,6 +113,7 @@ class AgentState:
         self.t = 0.0
         self.log_dir = log_dir
         self.session = None
+        self._received_at = time.monotonic()
         self.reset()
 
     def reset(self) -> None:
@@ -122,6 +123,7 @@ class AgentState:
             self.guide.stop()
             self.decision = self.window.decide(0.0)
             self.position = self.yaw_deg = self.jpeg = None
+            self._received_at = time.monotonic()
             self.session = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
 
     def write_log(self, row: dict) -> None:
@@ -138,9 +140,11 @@ class AgentState:
                  jpeg: bytes | None = None) -> str | None:
         """Update from one processed frame; returns a guidance instruction to speak, or None."""
         with self.lock:
+            self._received_at = time.monotonic()
             self.t = t
             match = match or {}
-            self.decision = self.window.push(t, match.get("ranking"))
+            ranking = match.get("ranking") if location.get("state", "LOCKED") == "LOCKED" else None
+            self.decision = self.window.push(t, ranking)
             self.position = match.get("position")
             place = self.decision.place
             # The localizer's yaw belongs to the place it reports; use it only when that is ours.
@@ -157,12 +161,14 @@ class AgentState:
 
     def snapshot(self) -> dict:
         with self.lock:
+            self.decision = self.window.decide(self.t + time.monotonic() - self._received_at)
             return {"decision": self.decision.to_dict(), "place_label": self.place_label(self.decision.place),
                     "nav": self.guide.status}
 
     # -- tools -----------------------------------------------------------------
     def tool(self, name: str, args: dict, describe=None) -> dict:
         with self.lock:
+            self.decision = self.window.decide(self.t + time.monotonic() - self._received_at)
             d = self.decision
             if name == "get_location":
                 if d.place is None:
@@ -174,7 +180,13 @@ class AgentState:
                     out["position_sigma_m"] = self.position.get("sigma_m")
                 return out
             if name == "get_surroundings":
-                return self.memory.summary(self.t, self.place_label)
+                now = self.t + time.monotonic() - self._received_at
+                result = self.memory.summary(now, self.place_label)
+                if now - self.t > 1:
+                    result["now"] = []
+                    result["note"] = "camera observations are stale"
+                result["recent"] = [r for r in result["recent"] if r["seconds_ago"] <= 60]
+                return result
             if name == "start_navigation":
                 dest = str(args.get("destination") or "entrance").lower()
                 if "entr" not in dest and "door" not in dest and "exit" not in dest and "out" not in dest:
@@ -208,7 +220,7 @@ class GeminiAgent:
             key = read_env_key("GOOGLE_API_KEY", "GEMINI_API_KEY")
             if not key:
                 raise RuntimeError("GOOGLE_API_KEY missing (environment or .env.local)")
-            self._client = genai.Client(api_key=key)
+            self._client = genai.Client(api_key=key, http_options={"timeout": 10000})
         return self._client
 
     @staticmethod
@@ -255,7 +267,7 @@ class GeminiAgent:
                 calls.append({"name": fc.name, "args": dict(fc.args or {}), "result": result})
                 parts.append(types.Part.from_function_response(name=fc.name, response=result))
             contents.append(types.Content(role="user", parts=parts))
-        heard, reply = parse_reply(resp.text if resp is not None else "")
+        heard, reply = parse_reply(resp.text if resp is not None and not resp.function_calls else "")
         self.history += [types.Content(role="user", parts=[types.Part.from_text(text=heard or "(unclear audio)")]),
                          types.Content(role="model", parts=[types.Part.from_text(text=reply)])]
         self.history = self.history[-2 * HISTORY_TURNS:]
@@ -272,18 +284,29 @@ def agent_router(get_agent) -> APIRouter:
     import asyncio
 
     router = APIRouter(prefix="/api/agent")
+    turn_lock = asyncio.Lock()
+
+    @router.get("/health")
+    async def health():
+        import shutil
+        agent = get_agent()
+        return {"ready": agent is not None, "key_configured": bool(read_env_key("GOOGLE_API_KEY", "GEMINI_API_KEY")),
+                "model": agent.model if agent else None, "ffmpeg_available": shutil.which("ffmpeg") is not None}
 
     @router.post("/talk")
     async def talk(audio: UploadFile = File(...)):
         agent = get_agent()
         if agent is None:
             raise HTTPException(503, "Agent not ready")
-        data = await audio.read()
+        data = await audio.read(MAX_AUDIO_BYTES + 1)
         if not data or len(data) > MAX_AUDIO_BYTES:
             raise HTTPException(413 if data else 422, "Audio clip empty or too large")
-        wav, mime = await asyncio.to_thread(to_wav, data)
+        if turn_lock.locked():
+            raise HTTPException(409, "A voice turn is already running")
         try:
-            return await asyncio.to_thread(agent.talk, wav, mime)
+            async with turn_lock:
+                wav, mime = await asyncio.to_thread(to_wav, data)
+                return await asyncio.to_thread(agent.talk, wav, mime)
         except Exception as ex:  # noqa: BLE001 - the phone must always get something to say
             log.exception("agent turn failed")
             msg = str(ex)

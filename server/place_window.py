@@ -66,14 +66,17 @@ class PlaceWindow:
         return self.decide(t)
 
     def decide(self, t: float) -> Decision:
+        while self.frames and self.frames[0][0] < t - self.window_s:
+            self.frames.popleft()
         good = [(c, p) for _, p, c in self.frames if p is not None and c > self.conf_min]
         if good:
             counts: dict[str, int] = {}
             for _, p in good:
                 counts[p] = counts.get(p, 0) + 1
             conf, place = max(good, key=lambda cp: (cp[0], counts[cp[1]]))
-            self.place, self.conf, self.last_confident_t = place, conf, t
-            return Decision(place, conf, "confident", counts[place], 0.0)
+            self.place, self.conf = place, conf
+            self.last_confident_t = max(ts for ts, p, c in self.frames if p == place and c > self.conf_min)
+            return Decision(place, conf, "confident", counts[place], t - self.last_confident_t)
         since = None if self.last_confident_t is None else t - self.last_confident_t
         if self.place is not None and since is not None and since <= self.unknown_after_s:
             return Decision(self.place, self.conf, "holding", 0, since)

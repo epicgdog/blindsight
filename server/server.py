@@ -222,6 +222,19 @@ class Pipeline:
         localized = time.monotonic()
         described = [describe(d, self.settings.hfov_deg) for d in detections]
         match = getattr(self.localizer, "last_debug", {}).get("match")
+        debug = getattr(self.localizer, "last_debug", {})
+        if debug.get("matched") is False:
+            match = None
+        elif match is None and debug.get("scope") == "property":
+            ranking = {}
+            for candidate in debug.get("candidates", []):
+                place = candidate.get("pano_id")
+                ranking[place] = max(ranking.get(place, 0), candidate.get("inliers", 0))
+            match = {
+                "ranking": [
+                    {"place": p, "inliers": count} for p, count in ranking.items() if p is not None
+                ]
+            }
         nav_text = None
         if self.agent_state is not None:
             try:

@@ -19,7 +19,7 @@ import { AUDIO_MODE, speechOptions } from "./src/audio";
 import { attitudeFromGravity, createMotionDetector, smoothGravity } from "./src/attitude";
 import { ackBody, createAckTracker, sendAck, speechAckUrl } from "./src/ack";
 import { PICTURE_OPTIONS, PICTURE_SIZE, SAVE_OPTIONS, resizePlan } from "./src/camera";
-import { MIN_CLIP_MS, RECORD_MODE, agentTalkUrl, postClip } from "./src/talk";
+import { RECORD_MODE, agentTalkUrl, postClip, createHoldToTalk } from "./src/talk";
 import NativeNavigation, { trackingModule } from "./NativeNavigation";
 
 const KEY = "blindsight.server";
@@ -37,9 +37,11 @@ function LegacyApp() {
   const client = useRef(null);
   const speaking = useRef(false);
   const talking = useRef(false); // hold-to-talk: cues stay quiet while the user speaks
-  const talkStart = useRef(0);
   const [talkState, setTalkState] = useState("idle"); // idle | listening | thinking
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderRef = useRef(recorder); recorderRef.current = recorder;
+  const addressRef = useRef(address); addressRef.current = address;
+  const talkController = useRef(null);
   const frames = useRef([]);
   const sizeLogged = useRef(false);
   const ackUrl = useRef(null);
@@ -148,37 +150,25 @@ function LegacyApp() {
   }, [address, perm, askPerm, speaker]);
 
   const talkIn = useCallback(async () => {
-    if (talking.current) return;
-    talking.current = true; talkStart.current = Date.now(); setTalkState("listening");
-    Speech.stop(); speaking.current = false;
-    try {
-      const p = await requestRecordingPermissionsAsync();
-      if (!p.granted) throw new Error("microphone permission denied");
-      await setAudioModeAsync(RECORD_MODE);
-      await recorder.prepareToRecordAsync();
-      recorder.record();
-    } catch (e) {
-      console.log("record", e?.message);
-      talking.current = false; setTalkState("idle");
-      Speech.speak("Microphone not available.", speechOptions());
-    }
-  }, [recorder, speaker]);
+    if (!talkController.current) talkController.current = createHoldToTalk({
+      prepare: async () => { await Speech.stop(); speaking.current = false;
+        const p = await requestRecordingPermissionsAsync();
+        if (!p.granted) throw Error("microphone permission denied");
+        await setAudioModeAsync(RECORD_MODE); await recorderRef.current.prepareToRecordAsync(); },
+      record: () => recorderRef.current.record(),
+      finish: async () => { await recorderRef.current.stop(); return recorderRef.current.uri; },
+      restore: () => setAudioModeAsync(AUDIO_MODE),
+      send: uri => { const url = agentTalkUrl(normalizeServerUrl(addressRef.current));
+        if (!url) throw Error("Server URL missing"); return postClip(fetch, url, uri); },
+      announce: text => speaker.announce(text), state: setTalkState,
+      busy: value => { talking.current = value; },
+    });
+    talkController.current.begin();
+  }, [speaker]);
 
   const talkOut = useCallback(async () => {
-    if (!talking.current) return;
-    const held = Date.now() - talkStart.current;
-    let uri = null;
-    try { await recorder.stop(); uri = recorder.uri; } catch (e) { console.log("record stop", e?.message); }
-    await setAudioModeAsync(AUDIO_MODE).catch(() => {});
-    talking.current = false;
-    const url = agentTalkUrl(normalizeServerUrl(address));
-    if (!uri || !url || held < MIN_CLIP_MS) { setTalkState("idle"); return; }
-    setTalkState("thinking");
-    const out = await postClip(fetch, url, uri);
-    if (out.heard) console.log(`heard: ${out.heard}`);
-    setTalkState("idle");
-    speaker.announce(out.reply);
-  }, [recorder, address, speaker]);
+    await talkController.current?.end();
+  }, []);
 
   const stop = useCallback(() => {
     runningRef.current = false; setRunning(false);
@@ -199,7 +189,7 @@ function LegacyApp() {
       <Pressable style={[s.talk, talkState === "listening" && s.talkOn]} onPressIn={talkIn} onPressOut={talkOut}
         accessibilityRole="button" accessibilityLabel="Hold to talk">
         <Text style={s.talkText}>
-          {talkState === "listening" ? "Listening…" : talkState === "thinking" ? "Thinking…" : "Hold to talk"}
+          {talkState === "preparing" ? "Preparing microphone…" : talkState === "listening" ? "Listening…" : talkState === "thinking" ? "Thinking…" : "Hold to talk"}
         </Text>
       </Pressable>
     </View>
