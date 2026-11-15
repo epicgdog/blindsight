@@ -44,10 +44,20 @@ ROOMS = [
          roles=["cafe"], aliases=["cafe", "café", "coffee", "atrium cafe"]),
     dict(id="161", level="1", building="LAS", label=(958, 690), door=(935, 690), name="Room 161", roles=[], aliases=[],
          approximate=True),
-    dict(id="restroom-1n", level="1", building="JRR", label=(605, 318), door=(602, 350), name="Restroom",
-         spoken="the restroom",
-         roles=["restroom"], aliases=["bathroom", "toilet", "restroom", "washroom", "mens room", "womens room"],
-         note="Seen on the plan as a row of toilets next to the north stairs; not yet checked on site."),
+    # Level 1 restrooms, told on site: women's next to Economics (Administration), north of the
+    # atrium; men's on the Health & Well Being side, south of the atrium (mirror of the north block)
+    dict(id="restroom-1n", level="1", building="JRR", label=(612, 318), door=(602, 350), name="Women's restroom",
+         spoken="the women's restroom",
+         roles=["restroom"], aliases=["bathroom", "toilet", "restroom", "washroom", "womens room", "women's room",
+                                      "womens restroom", "women's restroom", "womens bathroom", "women's bathroom",
+                                      "ladies room", "ladies", "women", "womens", "women's"],
+         note="Next to the Department of Economics (Administration), by the north stairs."),
+    dict(id="restroom-1s", level="1", building="JRR", label=(612, 560), door=(602, 520), name="Men's restroom",
+         spoken="the men's restroom",
+         roles=["restroom"], aliases=["bathroom", "toilet", "restroom", "washroom", "mens room", "men's room",
+                                      "mens restroom", "men's restroom", "mens bathroom", "men's bathroom",
+                                      "gents", "men", "mens", "men's"],
+         note="On the Center for Health & Well Being side, by the south stairs."),
     # Level 2
     dict(id="201", level="2", building="JRR", label=(295, 345), door=(338, 350), name="Hacker space 201",
          roles=["hacker space"], aliases=["hacking space", "hack room", "hacking room", "workspace"]),
@@ -83,7 +93,7 @@ ROOMS = [
                                      "expo", "lecture hall"]),
     dict(id="restroom-An", level="A", building="JRR", label=(538, 398), door=(535, 428), name="Restroom",
          spoken="the restroom",
-         roles=["restroom"], aliases=["bathroom", "toilet", "restroom", "washroom", "mens room", "womens room"],
+         roles=["restroom"], aliases=["bathroom", "toilet", "restroom", "washroom"],  # men's or women's: not known
          note="Seen on the plan as a row of toilets next to the north stairs; not yet checked on site."),
 ]
 
@@ -96,7 +106,7 @@ NODES = {
         "w_s": (406, 505),
         # ring around the atrium: north (y 365), south (y 505), east (x 598)
         "n_atr": (515, 365), "n_stair": (575, 365), "n_wc": (602, 365), "ne": (598, 365), "n_east": (636, 365),
-        "s_atr": (515, 505), "se": (598, 505), "s_east": (636, 505),
+        "s_atr": (515, 505), "se": (598, 505), "s_wc": (602, 505), "s_east": (636, 505),
         "e_atr": (598, 440),
         # atrium floor (117) and its centre
         "atr_w": (420, 440), "atr": (515, 440), "atr_stair": (500, 478),
@@ -141,7 +151,7 @@ CORRIDORS = {
     "1": [
         ["w_102", "w_101", "w_n", "w_atr", "w_s", "w_198"],
         ["w_n", "n_atr", "n_stair", "ne", "n_wc", "n_east"],
-        ["w_s", "s_atr", "se", "s_east", "l_w171", "l_elev", "l_144", "l_stair", "l_east"],
+        ["w_s", "s_atr", "se", "s_wc", "s_east", "l_w171", "l_elev", "l_144", "l_stair", "l_east"],
         ["ne", "e_atr", "se"],
         ["ew_n", "n_east", "s_east", "ew_s"],
         ["w_atr", "atr_w", "atr", "e_atr"], ["n_atr", "atr", "s_atr"], ["atr", "atr_stair"],
@@ -189,7 +199,7 @@ LINKS = [
 DOOR_JOINS = {
     "117": ("1", "atr"), "198": ("1", "w_198"), "101": ("1", "w_101"), "102": ("1", "w_102"),
     "144": ("1", "l_144"), "171": ("1", "las_atr"), "cafe": ("1", "las_cafe"), "161": ("1", "las_e161"),
-    "restroom-1n": ("1", "n_wc"),
+    "restroom-1n": ("1", "n_wc"), "restroom-1s": ("1", "s_wc"),
     "201": ("2", "w_201"), "200": ("2", "w_200"), "217": ("2", "d_217"), "298": ("2", "w_298"),
     "254": ("2", "d_254"), "271": ("2", "d_271"),
     "A01": ("A", "w_A01"), "A02": ("A", "w_A02"), "A12": ("A", "n_A12"), "A17": ("A", "n_A17"),

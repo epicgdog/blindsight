@@ -210,15 +210,52 @@
    "level": "1",
    "building": "JRR",
    "label": [
-    605,
+    612,
     318
    ],
    "door": [
     602,
     350
    ],
-   "name": "Restroom",
-   "spoken": "the restroom",
+   "name": "Women's restroom",
+   "spoken": "the women's restroom",
+   "roles": [
+    "restroom"
+   ],
+   "aliases": [
+    "bathroom",
+    "toilet",
+    "restroom",
+    "washroom",
+    "womens room",
+    "women's room",
+    "womens restroom",
+    "women's restroom",
+    "womens bathroom",
+    "women's bathroom",
+    "ladies room",
+    "ladies",
+    "women",
+    "womens",
+    "women's"
+   ],
+   "note": "Next to the Department of Economics (Administration), by the north stairs.",
+   "join": "n_wc"
+  },
+  {
+   "id": "restroom-1s",
+   "level": "1",
+   "building": "JRR",
+   "label": [
+    612,
+    560
+   ],
+   "door": [
+    602,
+    520
+   ],
+   "name": "Men's restroom",
+   "spoken": "the men's restroom",
    "roles": [
     "restroom"
    ],
@@ -228,10 +265,18 @@
     "restroom",
     "washroom",
     "mens room",
-    "womens room"
+    "men's room",
+    "mens restroom",
+    "men's restroom",
+    "mens bathroom",
+    "men's bathroom",
+    "gents",
+    "men",
+    "mens",
+    "men's"
    ],
-   "note": "Seen on the plan as a row of toilets next to the north stairs; not yet checked on site.",
-   "join": "n_wc"
+   "note": "On the Center for Health & Well Being side, by the south stairs.",
+   "join": "s_wc"
   },
   {
    "id": "201",
@@ -595,9 +640,7 @@
     "bathroom",
     "toilet",
     "restroom",
-    "washroom",
-    "mens room",
-    "womens room"
+    "washroom"
    ],
    "note": "Seen on the plan as a row of toilets next to the north stairs; not yet checked on site.",
    "join": "n_wc"
@@ -655,6 +698,10 @@
    ],
    "se": [
     598,
+    505
+   ],
+   "s_wc": [
+    602,
     505
    ],
    "s_east": [
@@ -973,6 +1020,7 @@
     "w_s",
     "s_atr",
     "se",
+    "s_wc",
     "s_east",
     "l_w171",
     "l_elev",

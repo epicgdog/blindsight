@@ -39,7 +39,11 @@ def test_spoken_numbers(text, want):
     ("food", {"171"}),
     ("check-in", {"117"}),
     ("where can I get coffee", {"cafe"}),
-    ("bathroom", {"restroom-1n", "restroom-An"}),
+    ("bathroom", {"restroom-1n", "restroom-1s", "restroom-An"}),
+    ("womens bathroom", {"restroom-1n"}),
+    ("women's restroom", {"restroom-1n"}),
+    ("mens room", {"restroom-1s"}),
+    ("men's bathroom", {"restroom-1s"}),
     ("juges room", {"A97", "A98"}),
 ])
 def test_search_by_purpose(venue, query, ids):
