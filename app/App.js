@@ -185,6 +185,8 @@ function LegacyApp() {
       isRunning: () => runningRef.current,
       capture: async () => {
         const p = await camera.current.takePictureAsync(PICTURE_OPTIONS);
+        // The frame's sensor stamp: time, compass and attitude at the shutter, before the slow resize.
+        const sensors = { ts_ms: Date.now(), heading_deg: heading.current ?? null, attitude: attitude.current };
         // Resize to 720 px on the short side on the phone, then read the JPEG bytes back.
         const ctx = ImageManipulator.manipulate(p.uri);
         const plan = resizePlan(p.width, p.height);
@@ -194,7 +196,7 @@ function LegacyApp() {
           sizeLogged.current = true;
           logCam("first frame", { camera: `${p.width}x${p.height}`, sending: `${out.width}x${out.height}` });
         }
-        return { bytes: base64ToBytes(out.base64), w: out.width, h: out.height };
+        return { bytes: base64ToBytes(out.base64), w: out.width, h: out.height, sensors };
       },
       send: async (bytes, header) => {
         await client.current.sendFrame(encodeFrame(header, bytes));

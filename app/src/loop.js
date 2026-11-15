@@ -34,8 +34,16 @@ export async function runCaptureLoop({
       onTiming({ captureMs, slow: captureMs > SLOW_MS });
       seq += 1;
       onFrame({ seq, captureStartMs: t0 });
-      const header = { seq, ts_ms: now(), heading_deg: getHeading() ?? null, w: shot.w, h: shot.h };
-      const att = getAttitude();
+      // Sensors as they were when the photo was taken (shot.sensors, read right after the shutter),
+      // not after the resize and encode: while turning, those can be hundreds of ms later.
+      const s = shot.sensors ?? {};
+      const header = {
+        seq,
+        ts_ms: Number.isFinite(s.ts_ms) ? s.ts_ms : now(),
+        heading_deg: ("heading_deg" in s ? s.heading_deg : getHeading()) ?? null,
+        w: shot.w, h: shot.h,
+      };
+      const att = "attitude" in s ? s.attitude : getAttitude();
       if (att) Object.assign(header, { pitch_deg: att.pitch_deg, roll_deg: att.roll_deg });
       if (att && typeof att.moving === "boolean") header.moving = att.moving;
       const steps = getSteps();
