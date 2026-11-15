@@ -62,12 +62,9 @@ SOURCES = [
     ("U.S. Bureau of Transportation Statistics, Passengers (2024)",
      "1.1 billion passengers on U.S. airlines in 2024",
      "https://data.bts.gov/stories/s/Passengers/itj6-vfiw/"),
-    ("American Hospital Association, Fast Facts on U.S. Hospitals, 2026",
-     "6,100 hospitals in the United States",
-     "https://www.aha.org/statistics/fast-facts-us-hospitals"),
-    ("Zimring, “The Costs of Confusion”, 1990, as cited in a 2014 review of hospital wayfinding",
-     "About $220,000 a year at one hospital, mostly staff time giving directions",
-     "https://pmc.ncbi.nlm.nih.gov/articles/PMC4287692"),
+    ("Institute of International Education, Open Doors 2025",
+     "1,177,766 international students in the United States in 2024/25",
+     "https://www.iie.org/news/open-doors-2025-press-release/"),
     ("Transportation Research Board, ACRP Research Report 161: Guidelines for Improving Airport "
      "Services for International Customers",
      "1,000 passengers surveyed at the top eight U.S. gateway airports ranked finding their way "
@@ -127,29 +124,34 @@ def s_title(prs):
 
 def s_story(prs):
     s = new_slide(prs)
-    title(s, "Gerard got lost and missed his flight",
-          sub="It happened to one of us, inside an airport, with a phone full of maps in his pocket.")
+    title(s, "Why we're building Insight", sub="Two stories from our own lives.")
     cards = [
-        ("map", "Maps stop at the door", "Phone maps get you to the building. Inside, you're on your own."),
-        ("signpost", "Finding your way matters",
-         "Travelers say finding their way is a top priority at U.S. airports " + cite(5) + "."),
-        ("desk", "Asking costs time", "Finding someone to ask, then remembering their directions, "
-         "eats the minutes you don't have."),
+        ("plane", "Gerard got lost and missed his flight",
+         "The maps on his phone got him to the airport. Inside the terminal they were no help, "
+         "and his flight left without him."),
+        ("language", "Jeeyan is about to study in South Korea",
+         "A semester abroad this spring: train stations, stores and campus buildings, with "
+         "signs in a language Jeeyan doesn't speak."),
     ]
-    w, gap, top = 3.85, 0.275, 2.0
+    w, gap, top = 5.95, 0.2, 1.95
     for k, (ico, head, body) in enumerate(cards):
         x = MARGIN + k * (w + gap)
-        rect(s, x, top, w, 3.3, MIST, name=f"{head} card")
+        rect(s, x, top, w, 3.3, MIST, name=f"{head[:20]} card")
         icon(s, ico, x + 0.85, top + 0.85, 0.95)
-        text(s, x + 0.4, top + 1.6, w - 0.8, 0.5, head, size=19, bold=True, name=f"{head} head")
-        text(s, x + 0.4, top + 2.15, w - 0.8, 1.0, body, size=15, color=MUTED, name=f"{head} body")
-    text(s, MARGIN, 5.85, 12.1, 0.6, [[("What if every building had turn-by-turn directions?",
+        text(s, x + 0.4, top + 1.55, w - 0.8, 0.5, head, size=20, bold=True, name=f"{head[:20]} head")
+        text(s, x + 0.4, top + 2.1, w - 0.8, 1.05, body, size=15, color=MUTED,
+             name=f"{head[:20]} body")
+    text(s, MARGIN, 5.5, 12.1, 0.4, "Signs and maps only help if you can read them, and if you can "
+         "find them. Travelers say finding their way is a top priority at U.S. airports " + cite(4)
+         + ".", size=14, color=MUTED, name="Context")
+    text(s, MARGIN, 6.05, 12.1, 0.6, [[("What if every building could talk you through it, so you "
+                                        "never had to read a sign?",
                                         {"italic": True, "bold": True, "color": AMBER})]],
          size=22, name="Hook")
-    notes(s, "Gerard got lost in an airport and missed his flight. Maps get you to the door; "
-          "inside, you're back to signs and asking around. In a survey of 1,000 passengers at "
-          "eight major U.S. airports, finding their way ranked as a top priority. We found no "
-          "published count of flights missed this way.")
+    notes(s, "Tell both stories in your own words. Gerard got lost inside an airport and missed his "
+          "flight: phone maps stop at the door. Jeeyan leaves this spring for a semester in South "
+          "Korea, where the signs will be in a language Jeeyan doesn't speak. Other people have "
+          "tried indoor navigation; we're building it for moments we've lived.")
     return s
 
 
@@ -307,7 +309,7 @@ def s_model(prs):
     s = new_slide(prs)
     title(s, "How we make money", sub="Venues pay. Visitors use it free.")
     cards = [
-        ("briefcase", "Who pays", "Airports, hospitals, universities, malls, offices and event "
+        ("briefcase", "Who pays", "Airports, universities, train stations, malls, offices and event "
          "venues: anyone whose visitors get lost."),
         ("dollar", "What they pay", "A setup fee while we walk and teach their routes, then a "
          "monthly subscription per building."),
@@ -367,52 +369,59 @@ def s_forward(prs):
 
 def s_customers(prs):
     s = new_slide(prs)
-    title(s, "Where we start", sub="Hospitals first: the cost of getting lost is already measured.")
-    stats = [("6,100", "hospitals in the United States", "AHA, 2026 " + cite(3)),
-             ("$220K", "a year of staff time spent giving directions, at one hospital (1990 study)",
-              "Zimring, as cited in a 2014 review " + cite(4))]
+    title(s, "Where we start", sub="Airports first, then universities: the places in our own stories.")
+    stats = [("1.1B", "passengers on U.S. airlines in 2024", "Bureau of Transportation Statistics "
+              + cite(2)),
+             ("1.2M", "international students at U.S. colleges and universities, 2024/25",
+              "Institute of International Education, Open Doors 2025 " + cite(3))]
     for k, (big, small, ref) in enumerate(stats):
         y = 1.95 + k * 2.3
         text(s, MARGIN, y, 5.6, 0.95, big, size=50, bold=True, font=HEAD, color=AMBER,
              name=f"{big} number")
         text(s, MARGIN, y + 0.95, 5.6, 0.75, small, size=16, color=TEXT, name=f"{big} words")
         text(s, MARGIN, y + 1.68, 5.6, 0.3, ref, size=10, color=MUTED, name=f"{big} source")
-    order = [("hospital", "1  Hospitals", "Patients and visitors, tight appointment times, staff "
-              "pulled away to give directions."),
-             ("plane", "2  Airports", "1.1 billion passengers on U.S. airlines in 2024 " + cite(2) +
-              ". Gerard was one of them."),
-             ("school", "3  Campuses and offices", "First days, visitors, events: the same problem, "
-              "smaller buildings.")]
+    order = [("plane", "1  Airports", "Gates, connections and terminals you've never seen, with a "
+              "clock running. Gerard missed his flight in one."),
+             ("school", "2  Universities", "International students, students abroad like Jeeyan, "
+              "first days and visitors: new buildings, often in a new language."),
+             ("pin", "3  Then everywhere else", "Train stations, malls, offices and event venues.")]
     for k, (ico, head, body) in enumerate(order):
         y = 1.95 + k * 1.55
         rect(s, 6.75, y, 6.0, 1.35, MIST, name=f"{head} card")
         icon(s, ico, 7.3, y + 0.67, 0.72)
         text(s, 7.85, y + 0.15, 4.75, 0.45, head, size=17, bold=True, name=f"{head} head")
         text(s, 7.85, y + 0.6, 4.75, 0.7, body, size=13, color=MUTED, name=f"{head} body")
-    notes(s, "Hospitals already know what getting lost costs them, and they care about patients "
-          "arriving on time. Airports and campuses come next.")
+    notes(s, "We start where our stories are. Airports: Gerard missed his flight in one, and more "
+          "than a billion people flew on U.S. airlines last year. Universities: over a million "
+          "international students in the U.S., and students like Jeeyan heading abroad.")
     return s
 
 
 def s_edge(prs):
     s = new_slide(prs)
-    title(s, "Why Insight wins")
-    rows = [("dollar", "Cheap to set up", "No beacons and no scanning. Walking a route teaches it."),
-            ("phone", "Runs on the phone in your pocket", "Camera, compass and step counter; nothing "
-             "to install in the building."),
+    title(s, "Why us, and why Insight")
+    rows = [("users", "We've lived it", "Gerard missed a flight. Jeeyan is about to study abroad. "
+             "We build for moments we know."),
+            ("dollar", "Cheap to set up", "No beacons and no scanning. Walking a route teaches it."),
+            ("phone", "Nothing to install", "Camera, compass and step counter on the phone in your "
+             "pocket."),
+            ("language", "No signs to read", "It recognises the place itself, so it works in any "
+             "building, in any country."),
             ("mic", "Voice first", "Hands-free for everyone, and usable by blind and low-vision "
              "visitors."),
             ("chart", "Data venues want", "Where people get lost and what they look for (planned "
              "dashboard).")]
+    w, h = 3.95, 2.1
     for k, (ico, head, body) in enumerate(rows):
-        x = MARGIN + (k % 2) * 6.15
-        y = 2.0 + (k // 2) * 2.2
-        rect(s, x, y, 5.95, 1.95, MIST, name=f"{head} card")
-        icon(s, ico, x + 0.6, y + 0.65, 0.8)
-        text(s, x + 1.2, y + 0.35, 4.5, 0.5, head, size=18, bold=True, name=f"{head} head")
-        text(s, x + 1.2, y + 0.85, 4.5, 1.0, body, size=14, color=MUTED, name=f"{head} body")
-    notes(s, "Our edge is setup cost: a route is taught by walking it, not by installing hardware "
-          "or scanning the building.")
+        x = MARGIN + (k % 3) * (w + 0.125)
+        y = 1.95 + (k // 3) * (h + 0.2)
+        rect(s, x, y, w, h, AMBER_SOFT if k == 0 else MIST, name=f"{head} card")
+        icon(s, ico, x + 0.6, y + 0.6, 0.72)
+        text(s, x + 0.3, y + 1.05, w - 0.5, 0.4, head, size=17, bold=True, name=f"{head} head")
+        text(s, x + 0.3, y + 1.43, w - 0.5, 0.65, body, size=13, color=MUTED, name=f"{head} body")
+    notes(s, "Other teams can build indoor navigation. Our edge is that we've lived the problem, and "
+          "that a route is taught by walking it, not by installing hardware or scanning the "
+          "building. It never reads a sign, so it works the same in South Korea as in Princeton.")
     return s
 
 
@@ -420,12 +429,13 @@ def s_next(prs):
     s = new_slide(prs)
     title(s, "What's next", sub="In order. None of this is in the demo yet.")
     cols = [("1", "Next weeks", "Prove it", ["Test on real phones in one building",
+                                            "Directions in your own language",
                                             "UI and UX: pick a destination, preview the route",
                                             "Haptic cues alongside the voice"]),
             ("2", "Next months", "Make it a product", ["Run fully on the phone, no laptop",
                                                        "Many routes per building, shared",
                                                        "The venue dashboard"]),
-            ("3", "Then", "Grow", ["Paid pilots with a hospital and an airport",
+            ("3", "Then", "Grow", ["Paid pilots with an airport and a university",
                                    "Apply to Y Combinator",
                                    "Build Insight full time"])]
     w, top = 3.85, 1.95
@@ -439,7 +449,7 @@ def s_next(prs):
              name=f"{when} label")
         text(s, x + 1.1, top + 0.58, w - 1.3, 0.45, goal, size=19, bold=True, name=f"{when} goal")
         for i, item in enumerate(items):
-            y = top + 1.4 + i * 0.95
+            y = top + 1.4 + i * (0.95 if max(len(c[3]) for c in cols) < 4 else 0.76)
             oval(s, x + 0.42, y + 0.17, 0.12, fill=AMBER, name="item dot")
             text(s, x + 0.65, y, w - 0.9, 0.8, item, size=15, color=TEXT, name=item[:20])
     notes(s, "Be clear that these are next steps.")
