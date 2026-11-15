@@ -454,7 +454,10 @@ def venue_router(get_venue, get_start=None) -> APIRouter:
     async def venue_search(q: str, level: str | None = None, u: float | None = None, v: float | None = None,
                            from_room: str | None = None):
         start = start_from(level, u, v, from_room)
-        return {"query": q, "start": None if start is None else {"level": start.level, "px": list(start.px)},
+        assumed = start is None
+        if assumed:  # position unknown: rank from check-in (117), the usual starting point
+            start = start_from(None, None, None, "117")
+        return {"query": q, "start": {"level": start.level, "px": list(start.px)}, "start_assumed": assumed,
                 "results": get_venue().search(q, start)}
 
     @router.get("/api/venue/route")

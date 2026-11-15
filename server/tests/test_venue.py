@@ -140,6 +140,8 @@ def test_api(settings):
         assert {r["id"] for r in res["results"]} == {"A97", "A98"}
         route = client.get("/api/venue/route", params={"to": "A98", "from_room": "117"}).json()
         assert route["ok"] and route["legs"][-1]["level"] == "A"
+        res = client.get("/api/venue/search", params={"q": "judges room"}).json()
+        assert res["start_assumed"] is True and [r["id"] for r in res["results"]] == ["A98", "A97"]
         # no start known (no phone yet): routes from check-in
         assert client.get("/api/venue/route", params={"to": "201"}).json()["ok"]
         assert client.get("/api/venue/route", params={"to": "A98", "prefer": "ladder"}).status_code == 422

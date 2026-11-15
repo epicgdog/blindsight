@@ -199,6 +199,10 @@ DOOR_JOINS = {
 
 
 def main() -> None:
+    from PIL import Image
+    for lv in LEVELS:
+        with Image.open(OUT.parent / lv["image"]) as im:
+            lv["width"], lv["height"] = im.size
     for r in ROOMS:
         lvl, node = DOOR_JOINS[r["id"]]
         assert lvl == r["level"], r["id"]

@@ -28,6 +28,9 @@ import { File } from "expo-file-system";
 import { RECORD_MODE, agentQuietUrl, agentTalkUrl, postClip, createHoldToTalk } from "./src/talk";
 import NativeNavigation, { trackingModule } from "./NativeNavigation";
 import FlatMap from "./src/FlatMap";
+import VenueMap from "./src/VenueMap";
+import { distanceText, imageUrl, shownLevel, venueBanner, venueDestUrl, venueInfoUrl, venueRouteUrl,
+  venueSearchUrl } from "./src/venue";
 import { BugIcon, CompassIcon, MicIcon, SpeakerIcon, TurnIcon } from "./src/Icons";
 import { accuracyText, banner, bottomBar, boxStyle, frameMatch, framePosition, headingText, mapMode, metricsUrl,
   navUrl, panoUrl, rankRows, whyLines, destUrl } from "./src/map";
@@ -71,6 +74,13 @@ function LegacyApp() {
   const [muted, setMuted] = useState(false);
   const [debugDots, setDebugDots] = useState(false); // matched place and candidates on the map
   const [mapPref, setMapPref] = useState("follow"); // follow (heading-up) | north
+  // HackPrinceton venue: plans of levels 2, 1, A; room search; the room being guided to.
+  const [venueData, setVenueData] = useState(null); // /api/venue: levels (image, size, align) and rooms
+  const [venueQ, setVenueQ] = useState("");
+  const [venueHits, setVenueHits] = useState(null); // search results, null when the list is closed
+  const [localRoute, setLocalRoute] = useState(null); // route fetched on selection, until frames carry it
+  const [levelPick, setLevelPick] = useState(null); // level chosen with the tabs; null follows you
+  const [stepsOpen, setStepsOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -331,6 +341,57 @@ function LegacyApp() {
     return () => { cancelled = true; };
   }, [status.connected, mapData]);
 
+  // Venue plans and rooms, once per server.
+  useEffect(() => { setVenueData(null); }, [address]);
+  useEffect(() => {
+    if (!status.connected || venueData) return;
+    const url = venueInfoUrl(normalizeServerUrl(addressRef.current));
+    if (!url) return;
+    let cancelled = false;
+    fetch(url).then((r) => r.json())
+      .then((v) => { if (!cancelled && Array.isArray(v?.levels)) setVenueData(v); })
+      .catch((e) => logApp("venue fetch failed", { error: e?.message }));
+    return () => { cancelled = true; };
+  }, [status.connected, venueData]);
+
+  // Room search as you type (debounced); the server ranks by walking distance from you.
+  useEffect(() => {
+    const q = venueQ.trim();
+    if (!q) { setVenueHits(null); return; }
+    const url = venueSearchUrl(normalizeServerUrl(addressRef.current), q);
+    if (!url) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      fetch(url).then((r) => r.json())
+        .then((res) => { if (!cancelled) setVenueHits(res?.results ?? []); })
+        .catch((e) => { if (!cancelled) setVenueHits([]); logApp("venue search failed", { error: e?.message }); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [venueQ]);
+
+  const goToRoom = useCallback(async (room) => {
+    const wsUrl = normalizeServerUrl(addressRef.current);
+    setVenueQ(""); setVenueHits(null); setLevelPick(null); setStepsOpen(false);
+    setPinDraft(null); setPinMode(false);
+    logApp("venue destination", { room: room.id });
+    try {
+      // Show the route at once; the server's live route (from your position) replaces it.
+      const rt = await (await fetch(venueRouteUrl(wsUrl, room.id))).json();
+      setLocalRoute(rt?.ok ? rt : null);
+      await fetch(venueDestUrl(wsUrl), { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: room.id }) });
+    } catch (e) { logApp("venue destination failed", { error: e?.message }); }
+  }, []);
+  const endRoom = useCallback(async () => {
+    setLocalRoute(null); setLevelPick(null); setStepsOpen(false);
+    const url = venueDestUrl(normalizeServerUrl(addressRef.current));
+    if (!url) return;
+    setResult((r) => (r?.agent?.venue ? { ...r, agent: { ...r.agent, venue: { ...r.agent.venue, dest: null, route: null } } } : r));
+    try {
+      await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: null }) });
+    } catch (e) { logApp("venue clear failed", { error: e?.message }); }
+  }, []);
+
   // Server latency percentiles, only while someone is looking at them.
   useEffect(() => {
     if (!debugOpen || !running) return;
@@ -352,6 +413,10 @@ function LegacyApp() {
   const [pinMode, setPinMode] = useState(false); // "Add pin" pressed: the next map tap drops the pin
   const onTapMap = useCallback(async (m) => {
     setPinMode(false);
+    if (m.level && m.level !== "1") {
+      setPinDraft({ error: "pins work on the ground floor; search for a room instead" });
+      return;
+    }
     const url = destUrl(normalizeServerUrl(addressRef.current), m.x, m.y);
     if (!url) return;
     setPinDraft({ x: m.x, y: m.y, loading: true });
@@ -412,9 +477,18 @@ function LegacyApp() {
   const facing = result?.agent?.heading ?? null;
   const position = framePosition(result);
   const path = result?.agent?.path ?? null;
-  const b = running ? banner({ connected: status.connected, nav, position })
-    : { title: "Not started", meters: "", arrow: null, tone: "off" };
-  const bar = bottomBar(nav);
+  // Room route: the server's live one (from your position, first step relative to where you
+  // face), else the one fetched when the room was picked.
+  const liveVenue = result?.agent?.venue ?? null;
+  const vRoute = liveVenue?.route?.ok ? liveVenue.route : localRoute;
+  const vDest = vRoute?.ok ? vRoute.to : liveVenue?.dest ?? null;
+  const level = shownLevel({ override: levelPick, you: liveVenue?.you, route: vRoute });
+  const lv = venueData?.levels?.find((l) => l.id === level) ?? null;
+  const vb = venueBanner(vRoute);
+  const b = !running ? { title: "Not started", meters: "", arrow: null, tone: "off" }
+    : vb && status.connected ? vb : banner({ connected: status.connected, nav, position });
+  const bar = vRoute?.ok ? { time: `${Math.max(1, Math.round(vRoute.total_m / 60))} min`, left: `${distanceText(vRoute.total_m)} left` }
+    : bottomBar(nav);
   const mode = mapMode(mapPref, position, facing?.heading_deg);
   const match = frameMatch(result);
   const loc = result?.location ?? null;
@@ -429,9 +503,17 @@ function LegacyApp() {
   return (
     <View style={[s.root, { height: winH, width: winW }]}>
       <StatusBar barStyle="dark-content" />
-      <FlatMap map={mapData?.map} path={path} position={position} headingDeg={facing?.heading_deg} ranking={frameMatch(result)?.ranking} activeId={result?.agent?.decision?.place} debugDots={debugDots}
-        insetTop={TOP + 120} insetBottom={debugOpen ? sheetH + 8 : BOTTOM + BAR_H + 8}
-        preview={pinDraft?.ok || pinDraft?.loading ? pinDraft : null} onTapMap={pinMode && status.connected ? onTapMap : null} />
+      {venueData ? (
+        <VenueMap lv={lv} uri={imageUrl(normalizeServerUrl(address), lv?.image_url)} route={vRoute} dest={vDest}
+          you={liveVenue?.you} headingDeg={facing?.heading_deg}
+          insetTop={TOP + 176} insetBottom={debugOpen ? sheetH + 8 : BOTTOM + BAR_H + 8}
+          entrancePath={path} pin={path?.goal_kind === "pin" ? path.goal : null}
+          pinDraft={pinDraft?.ok || pinDraft?.loading ? pinDraft : null} onTapMap={pinMode && status.connected ? onTapMap : null} />
+      ) : (
+        <FlatMap map={mapData?.map} path={path} position={position} headingDeg={facing?.heading_deg} ranking={frameMatch(result)?.ranking} activeId={result?.agent?.decision?.place} debugDots={debugDots}
+          insetTop={TOP + 120} insetBottom={debugOpen ? sheetH + 8 : BOTTOM + BAR_H + 8}
+          preview={pinDraft?.ok || pinDraft?.loading ? pinDraft : null} onTapMap={pinMode && status.connected ? onTapMap : null} />
+      )}
 
       <View style={s.top} pointerEvents="box-none">
         <View style={[s.banner, b.tone === "go" || b.tone === "done" ? s.bannerGo : s.bannerWait]}>
@@ -448,7 +530,44 @@ function LegacyApp() {
           </Pressable>
         </View>
         {talkNote ? <Text style={[s.talkNote, talkState === "listening" && s.talkNoteOn]}>{talkNote}</Text> : null}
+        {venueData ? (
+          <View style={s.search}>
+            <TextInput style={s.searchInput} value={venueQ} onChangeText={setVenueQ} placeholder="Search rooms: judges, A97, food…"
+              placeholderTextColor="#80868b" autoCorrect={false} autoCapitalize="none" returnKeyType="search" clearButtonMode="while-editing"
+              accessibilityLabel="Search rooms by number or purpose" />
+          </View>
+        ) : null}
+        {venueHits ? (
+          <View style={s.hits}>
+            {venueHits.length ? venueHits.map((h) => (
+              <Pressable key={h.id} style={s.hit} onPress={() => goToRoom(h)} accessibilityRole="button"
+                accessibilityLabel={`${h.name}, ${h.level_name}${h.distance_m != null ? `, ${Math.round(h.distance_m)} meters` : ""}`}>
+                <Text style={s.hitTitle} numberOfLines={1}>{h.name}</Text>
+                <Text style={s.hitSub} numberOfLines={1}>
+                  {h.level_name}{h.distance_m != null ? ` · ${distanceText(h.distance_m)}` : ""}{h.approximate ? " · door approximate" : ""}
+                </Text>
+              </Pressable>
+            )) : <Text style={s.hitNone}>No room matches “{venueQ.trim()}”</Text>}
+          </View>
+        ) : null}
       </View>
+
+      {venueData ? (
+        <View style={s.levels} pointerEvents="box-none">
+          {venueData.levels.map((l) => {
+            const on = l.id === level, onRoute = vRoute?.ok && vRoute.legs.some((g) => g.level === l.id);
+            const isYou = liveVenue?.you?.level === l.id;
+            return (
+              <Pressable key={l.id} style={[s.levelBtn, on && s.levelOn]} onPress={() => setLevelPick(l.id === (liveVenue?.you?.level ?? null) ? null : l.id)}
+                accessibilityRole="button" accessibilityLabel={`Show ${l.name}`} accessibilityState={{ selected: on }}>
+                <Text style={[s.levelText, on && s.levelTextOn]}>{l.id}</Text>
+                {onRoute ? <View style={[s.levelDot, on && s.levelDotOn]} /> : null}
+                {isYou ? <Text style={[s.levelYou, on && s.levelTextOn]}>you</Text> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
 
       <View style={s.side} pointerEvents="box-none">
         <Pressable style={s.round} hitSlop={8} onPress={() => setMapPref((p) => (p === "follow" ? "north" : "follow"))}
@@ -466,7 +585,22 @@ function LegacyApp() {
       </View>
       {accuracy ? <View style={s.chip}><Text style={s.chipText}>{accuracy}</Text></View> : null}
 
-      {pinMode ? (
+      {vRoute?.ok && !pinMode && !pinDraft ? (
+        <View style={s.pinCard}>
+          <Pressable onPress={() => setStepsOpen((o) => !o)} accessibilityRole="button"
+            accessibilityLabel={`${vDest?.name}. ${stepsOpen ? "Hide" : "Show"} all steps`}>
+            <Text style={s.pinTitle} numberOfLines={1}>{vDest?.name}</Text>
+            <Text style={s.pinNote}>
+              {vDest?.level_name} · {distanceText(vRoute.total_m)}{vRoute.start_assumed ? " from check-in" : ""} · {stepsOpen ? "hide steps" : "all steps"}
+            </Text>
+          </Pressable>
+          {stepsOpen ? (
+            <ScrollView style={s.steps}>
+              {vRoute.steps.map((st, i) => <Text key={i} style={s.step}>{i + 1}. {st}</Text>)}
+            </ScrollView>
+          ) : null}
+        </View>
+      ) : pinMode ? (
         <View style={s.pinCard} pointerEvents="none">
           <Text style={s.pinTitle}>Tap the map where you want to go</Text>
         </View>
@@ -503,7 +637,11 @@ function LegacyApp() {
           )}
           {result?.agent?.place_label && decision?.state !== "unknown" ? <Text style={s.barPlace} numberOfLines={1}>{result.agent.place_label}</Text> : null}
         </View>
-        {navActive ? (
+        {vRoute?.ok ? (
+          <Pressable style={s.exit} onPress={endRoom} hitSlop={8} accessibilityRole="button" accessibilityLabel="End route to the room">
+            <Text style={s.exitText}>End</Text>
+          </Pressable>
+        ) : navActive ? (
           <Pressable style={[s.exit, !status.connected && s.disabled]} onPress={toggleNav} disabled={!status.connected}
             hitSlop={8} accessibilityRole="button" accessibilityLabel="Exit guidance">
             <Text style={s.exitText}>Exit</Text>
@@ -611,6 +749,24 @@ const s = StyleSheet.create({
   pinStart: { paddingVertical: 10, paddingHorizontal: 22, borderRadius: 20, backgroundColor: "#1a73e8" },
   pinStartText: { color: "#fff", fontSize: 16, fontWeight: "700" },
   pinModeOn: { backgroundColor: "#5f6368" },
+  search: { marginTop: 8, backgroundColor: "#fff", borderRadius: 24, paddingHorizontal: 16, height: 46, justifyContent: "center", ...shadow },
+  searchInput: { fontSize: 16, color: "#202124" },
+  hits: { marginTop: 6, backgroundColor: "#fff", borderRadius: 16, paddingVertical: 4, ...shadow },
+  hit: { paddingVertical: 10, paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e8eaed" },
+  hitTitle: { color: "#202124", fontSize: 16, fontWeight: "600" },
+  hitSub: { color: "#5f6368", fontSize: 13, marginTop: 2 },
+  hitNone: { color: "#5f6368", fontSize: 15, padding: 14 },
+  levels: { position: "absolute", left: 12, top: TOP + 186, gap: 8 },
+  levelBtn: { width: 46, minHeight: 46, borderRadius: 12, backgroundColor: "#fff", alignItems: "center", justifyContent: "center",
+    paddingVertical: 4, ...shadow },
+  levelOn: { backgroundColor: "#1a73e8" },
+  levelText: { color: "#202124", fontSize: 18, fontWeight: "800" },
+  levelTextOn: { color: "#fff" },
+  levelDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#1a73e8", marginTop: 2 },
+  levelDotOn: { backgroundColor: "#fff" },
+  levelYou: { color: "#1a73e8", fontSize: 10, fontWeight: "700" },
+  steps: { maxHeight: 220, marginTop: 6 },
+  step: { color: "#202124", fontSize: 15, paddingVertical: 3 },
   pinChip: { position: "absolute", left: 12, bottom: BOTTOM + BAR_H + 60, backgroundColor: "#fff", borderRadius: 18,
     paddingVertical: 8, paddingHorizontal: 14, ...shadow },
   pinChipText: { color: "#202124", fontSize: 15, fontWeight: "600" },

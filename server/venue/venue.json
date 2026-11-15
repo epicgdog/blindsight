@@ -6,7 +6,9 @@
    "spoken": "level 2",
    "order": 2,
    "image": "level_2.png",
-   "scanned": true
+   "scanned": true,
+   "width": 1492,
+   "height": 954
   },
   {
    "id": "1",
@@ -14,7 +16,9 @@
    "spoken": "the ground floor",
    "order": 1,
    "image": "level_1.png",
-   "scanned": true
+   "scanned": true,
+   "width": 1554,
+   "height": 1008
   },
   {
    "id": "A",
@@ -22,7 +26,9 @@
    "spoken": "level A, one floor below ground",
    "order": 0,
    "image": "level_A.png",
-   "scanned": false
+   "scanned": false,
+   "width": 1556,
+   "height": 994
   }
  ],
  "rooms": [
