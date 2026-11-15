@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from server.agent import AgentState, GeminiAgent, agent_router, parse_reply
+from server.agent import AgentState, LiveAgent, agent_router
 from server.cues import CueEngine
 from server.entrance_nav import EntranceGuide, EntranceMap, clear_line, clock, mesh_heading_deg, shortest_path
 from server.place_window import PlaceWindow, frame_confidence
@@ -85,31 +85,11 @@ def test_mesh_heading_and_clock():
     assert clock(0) == 12 and clock(60) == 2 and clock(-90) == 9
 
 
-def test_guide_turns_then_goes_straight_then_arrives():
-    g = EntranceGuide(corridor())
-    assert g.start("a")["ok"]
-    # facing +y (yaw 0) while the next point is to the east (+x): turn right to 3 o'clock
-    assert g.update(0.0, "a", "confident", 0.0, None) == "Turn right, to your 3 o'clock."
-    assert g.update(0.5, "a", "confident", 0.0, None) is None  # same text, not repeated yet
-    assert g.update(7.0, "a", "confident", 0.0, None) == "Turn right, to your 3 o'clock."  # 6 s reminder
-    assert g.update(8.0, "a", "confident", 90.0, None) == "Go straight, about 3 meters."
-    assert g.update(9.0, "c", "confident", 0.0, None) == "Go straight, about 3 meters."
-    assert g.update(10.0, "d", "confident", 0.0, None) == "You're at the entrance."
-    assert not g.active
-
-
 def test_guide_pauses_once_when_place_unknown():
     g = EntranceGuide(corridor())
     g.start("a")
-    assert g.update(0.0, None, "unknown", None, None).startswith("Paused")
+    assert g.update(0.0, None, "unknown", None, None).startswith("Hold the phone steady")
     assert g.update(7.0, None, "unknown", None, None) is None
-
-
-def test_guide_uses_tracked_position_near_the_place():
-    g = EntranceGuide(corridor())
-    g.start("a")
-    text = g.update(0.0, "b", "confident", 90.0, {"x": 4.0, "y": 0.0})
-    assert text == "Go straight, about 2 meters."
 
 
 def test_real_floor_reaches_the_entrance():
@@ -153,11 +133,6 @@ def test_scene_memory_keeps_recent_objects():
 
 
 # ---- agent ---------------------------------------------------------------------------
-def test_parse_reply():
-    assert parse_reply("HEARD: take me out\nREPLY: Starting guidance.") == ("take me out", "Starting guidance.")
-    assert parse_reply("Okay.") == ("", "Okay.")
-
-
 def make_state(tmp_path):
     s = AgentState(tmp_path, entrance="d", log_dir=tmp_path / "log")
     s.map = corridor()
@@ -166,43 +141,23 @@ def make_state(tmp_path):
     return s
 
 
-class FakeModels:
-    """First call asks for start_navigation, second returns the spoken reply."""
-
-    def __init__(self):
-        self.calls = []
-
-    def generate_content(self, model, contents, config=None):
-        self.calls.append(contents)
-        if len(self.calls) == 1:
-            fc = SimpleNamespace(name="start_navigation", args={"destination": "entrance"})
-            return SimpleNamespace(function_calls=[fc], text=None,
-                                   candidates=[SimpleNamespace(content=_model_content())])
-        return SimpleNamespace(function_calls=None, text="HEARD: take me to the entrance\nREPLY: Okay, let's go.",
-                               candidates=[])
+AT_A = ({"ranking": rank(("a", 200))}, [], {"pano_id": "a", "yaw_deg": 0.0})
 
 
-def _model_content():
-    from google.genai import types
-
-    return types.Content(role="model", parts=[types.Part.from_text(text="calling")])
-
-
-def test_agent_calls_tool_and_logs(tmp_path):
+def test_frames_emit_guidance_and_close_obstacles(tmp_path):
     state = make_state(tmp_path)
-    state.on_frame(0.0, {"ranking": rank(("a", 200))}, [], {"pano_id": "a", "yaw_deg": 0.0})
-    models = FakeModels()
-    agent = GeminiAgent(state, model="fake", client=SimpleNamespace(models=models))
-    out = agent.talk(b"RIFF....", "audio/wav")
-    assert out["heard"] == "take me to the entrance" and out["reply"] == "Okay, let's go."
-    assert out["tools"][0]["name"] == "start_navigation" and out["tools"][0]["result"]["ok"]
-    assert state.guide.active
-    # guidance now speaks on the next frame
-    assert state.on_frame(1.0, {"ranking": rank(("a", 200))}, [], {"pano_id": "a", "yaw_deg": 0.0}) \
-        == "Turn right, to your 3 o'clock."
-    rows = [json.loads(x) for x in (tmp_path / "log" / f"{state.session}.jsonl").read_text().splitlines()]
-    assert {r["kind"] for r in rows} == {"frame", "talk"}
-    assert len(agent.history) == 2
+    said = []
+    state.emit = lambda text, urgent: said.append((text, urgent))
+    state.guide.start("a")
+    state.on_frame(0.0, *AT_A)
+    chair = [{"cls": "chair", "direction": "ahead", "distance": "very close"}]
+    state.on_frame(0.5, AT_A[0], chair, AT_A[2])
+    state.on_frame(1.0, AT_A[0], chair, AT_A[2])  # second frame in a row: urgent event
+    state.on_frame(1.5, AT_A[0], chair, AT_A[2])  # not repeated within 6 s
+    assert said == [("[step] Turn right, to your 3 o'clock.", False), ("[urgent] Stop. chair very close, ahead.", True)]
+    state.quiet = True
+    state.guide.last_text = None  # would speak again, but the user is talking
+    assert state.on_frame(2.0, *AT_A) == []
 
 
 def test_location_tool_never_guesses(tmp_path):
@@ -213,19 +168,155 @@ def test_location_tool_never_guesses(tmp_path):
     assert out["place"] == "the entrance" and out["is_entrance"]
 
 
-def test_talk_endpoint_turns_errors_into_speech(tmp_path):
+# ---- Live agent with a fake session ----------------------------------------------------
+def sc(**kw):
+    base = dict(input_transcription=None, output_transcription=None, model_turn=None, turn_complete=False)
+    base.update(kw)
+    return SimpleNamespace(server_content=SimpleNamespace(**base), tool_call=None)
+
+
+def audio_turn(text):
+    part = SimpleNamespace(inline_data=SimpleNamespace(data=b"\x00\x01" * 2400))
+    return [sc(output_transcription=SimpleNamespace(text=text), model_turn=SimpleNamespace(parts=[part])),
+            sc(turn_complete=True)]
+
+
+class FakeSession:
+    """Answers a talk turn with a start_navigation call then a spoken reply; events with speech."""
+
+    def __init__(self):
+        import asyncio
+
+        self.q = asyncio.Queue()
+        self.sent = []
+
+    async def send_realtime_input(self, **kw):
+        self.sent.append(("realtime", sorted(kw)))
+        if "activity_end" in kw:
+            fc = SimpleNamespace(id="1", name="start_navigation", args={"destination": "entrance"})
+            await self.q.put([sc(input_transcription=SimpleNamespace(text="take me to the entrance")),
+                              SimpleNamespace(server_content=None, tool_call=SimpleNamespace(function_calls=[fc])),
+                              sc(turn_complete=True)])  # real Live ends the tool-call turn silently
+
+    async def send_tool_response(self, function_responses):
+        self.sent.append(("tool", [(r.name, r.response) for r in function_responses]))
+        await self.q.put(audio_turn("Guiding you to the entrance, about 3 meters."))
+
+    async def send_client_content(self, turns, turn_complete):
+        text = turns["parts"][0]["text"]
+        self.sent.append(("context" if text.startswith("CONTEXT:") else "event", text))
+        if turn_complete:
+            await self.q.put(audio_turn("Turn right, to your 3 o'clock."))
+
+    async def receive(self):
+        for r in await self.q.get():
+            yield r
+
+
+class FakeConnect:
+    def __init__(self, session):
+        self.session = session
+
+    async def __aenter__(self):
+        return self.session
+
+    async def __aexit__(self, *a):
+        return False
+
+
+def fake_client(session):
+    return SimpleNamespace(aio=SimpleNamespace(live=SimpleNamespace(connect=lambda model, config: FakeConnect(session))))
+
+
+def test_live_agent_talk_calls_tools_and_speaks(tmp_path):
+    import asyncio
+
+    state = make_state(tmp_path)
+    state.on_frame(0.0, *AT_A)
+    session = FakeSession()
+    agent = LiveAgent(state, client=fake_client(session))
+
+    async def run():
+        out = await agent.talk(b"\x00" * 32000)
+        await agent.event("Turn right, to your 3 o'clock.")
+        for _ in range(50):
+            if sum(m["last"] for m in agent.outbox) >= 2:
+                break
+            await asyncio.sleep(0.01)
+        await agent.close()
+        return out
+
+    out = asyncio.run(run())
+    assert out["heard"] == "take me to the entrance"
+    assert out["reply"].startswith("Guiding you") and out["tools"][0]["name"] == "start_navigation"
+    assert out["tools"][0]["result"]["ok"] and state.guide.active
+    assert agent.clips[out["clip"]][:4] == b"RIFF"
+    assert [x[0] for x in session.sent[:4]] == ["context", "realtime", "realtime", "realtime"]  # ctx, start, audio, end
+    assert ("event", "EVENT Turn right, to your 3 o'clock.") in session.sent
+    segs = agent.take_outbox()  # no phone attached: segments wait in the outbox
+    firsts = [(m["type"], m["interrupt"]) for m in segs if m["first"]]
+    assert firsts == [("voice", True), ("voice", False)]  # the answer cuts in, a guidance event queues
+    assert sum(m["last"] for m in segs) == 2 and not any(m["interrupt"] for m in segs if not m["first"])
+    assert all(m["url"].startswith("/api/agent/clip/") for m in segs if "url" in m)
+    rows = [json.loads(x) for x in (tmp_path / "log" / f"{state.session}.jsonl").read_text().splitlines()]
+    assert {r["kind"] for r in rows} == {"frame", "talk", "event"}
+
+
+def test_talk_endpoint_reports_errors(tmp_path):
     from fastapi import FastAPI
 
     state = make_state(tmp_path)
 
     class Broken:
-        def generate_content(self, **kw):
+        def connect(self, model, config):
             raise RuntimeError("402 RESOURCE_EXHAUSTED")
 
-    agent = GeminiAgent(state, model="fake", client=SimpleNamespace(models=Broken()))
+    agent = LiveAgent(state, client=SimpleNamespace(aio=SimpleNamespace(live=Broken())))
     app = FastAPI()
     app.include_router(agent_router(lambda: agent))
     c = TestClient(app)
-    r = c.post("/api/agent/talk", files={"audio": ("clip.m4a", b"not really audio", "audio/m4a")})
-    assert r.status_code == 200 and "credit" in r.json()["reply"]
+    import subprocess
+
+    wav = subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", "0.5",
+                          "-f", "wav", "pipe:1"], capture_output=True, check=True).stdout
+    r = c.post("/api/agent/talk", files={"audio": ("clip.wav", wav, "audio/wav")})
+    assert r.status_code == 200 and r.json()["detail"] == "out of credit" and not r.json().get("url")
+    assert c.post("/api/agent/talk", files={"audio": ("clip.m4a", b"junk", "audio/m4a")}).status_code == 422
     assert c.get("/api/agent/state").json()["decision"]["state"] == "unknown"
+    assert c.get("/api/agent/clip/nope").status_code == 404
+
+
+def test_wav_response_serves_byte_ranges_for_ios():
+    from server.voice import wav_response
+    data = bytes(range(10))
+    full = wav_response(data, None)
+    assert full.status_code == 200 and full.body == data and full.headers["accept-ranges"] == "bytes"
+    probe = wav_response(data, "bytes=0-1")
+    assert probe.status_code == 206 and probe.body == data[:2]
+    assert probe.headers["content-range"] == "bytes 0-1/10"
+    assert wav_response(data, "bytes=4-").body == data[4:]
+    assert wav_response(data, "bytes=-3").body == data[7:]
+    assert wav_response(data, "bytes=8-100").headers["content-range"] == "bytes 8-9/10"
+    assert wav_response(data, "bytes=20-").status_code == 416
+
+
+def test_talk_endpoint_accepts_raw_body(tmp_path):
+    from fastapi import FastAPI
+
+    state = make_state(tmp_path)
+
+    class Broken:
+        def connect(self, model, config):
+            raise RuntimeError("402 RESOURCE_EXHAUSTED")
+
+    agent = LiveAgent(state, client=SimpleNamespace(aio=SimpleNamespace(live=Broken())))
+    app = FastAPI()
+    app.include_router(agent_router(lambda: agent))
+    c = TestClient(app)
+    import subprocess
+
+    wav = subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", "0.5",
+                          "-f", "wav", "pipe:1"], capture_output=True, check=True).stdout
+    r = c.post("/api/agent/talk", content=wav, headers={"Content-Type": "audio/m4a"})
+    assert r.status_code == 200 and r.json()["detail"] == "out of credit"  # decoded and reached the agent
+    assert c.post("/api/agent/talk", content=b"", headers={"Content-Type": "audio/m4a"}).status_code == 422

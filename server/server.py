@@ -35,18 +35,18 @@ from pydantic import BaseModel, Field
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from server.agent import AgentState, GeminiAgent, agent_router
+from server.agent import AgentState, LiveAgent, agent_router
+from server.voice import GeminiVoice, voice_router
 from server.config import Settings, env_bool
 from server.cues import CueEngine, describe
 from server.detect import Detector, StubDetector
 from server.minimap import scan_points
 from server.navigation import navigation_router
-from server.protocol import FramePacket, ProtocolError, decode_frame
+from server.protocol import FramePacket, ProtocolError, decode_frame, parse_imu
 from server.record import SessionRecorder
 from server.spatial import spatial_router
 
 log = logging.getLogger("blindsight")
-AGENT_ON = env_bool("AGENT", True)  # voice agent + entrance guidance (demo)
 
 
 def decode_image(packet: FramePacket, settings: Settings) -> tuple[np.ndarray, bytes]:
@@ -238,15 +238,18 @@ class Pipeline:
                     {"place": p, "inliers": count} for p, count in ranking.items() if p is not None
                 ]
             }
-        nav_text = None
         if self.agent_state is not None:
+            # The Live agent is the only voice: it gets events (guidance, close obstacles) and
+            # decides what to say, so the cue engine stays silent.
+            cue = None
             try:
-                nav_text = self.agent_state.on_frame(
-                    localized, match, described, self.location.to_dict(), jpeg
-                )
+                self.agent_state.on_frame(localized, match, described, self.location.to_dict(), jpeg,
+                                         compass_deg=hdr.heading_deg, moving=hdr.moving, steps=hdr.steps,
+                                         ts_ms=hdr.ts_ms)
             except Exception:  # guidance must never break the frame pipeline
                 log.exception("Agent state update failed")
-        cue = self.cues.update(detections, self.location, localized, nav_text=nav_text)
+        else:
+            cue = self.cues.update(detections, self.location, localized)
         if warmup and localized < warmup.deadline:
             warmup.attempted += 1
             try:
@@ -372,6 +375,7 @@ class Runtime:
     warmup: Warmup | None = None
     cue_ids: dict = field(default_factory=dict)
     agent: object = None
+    voice: object = None
 
     async def work(self, function, *args):
         future = asyncio.get_running_loop().run_in_executor(self.executor, function, *args)
@@ -508,12 +512,19 @@ def create_app(
                 settings, actual_detector, executor, Metrics(settings.metrics_window_s), factory
             )
             runtime.initial_localizer = initial_localizer
-            if AGENT_ON:
+            if env_bool("AGENT", True):
                 try:
                     state = AgentState(settings.data_dir, log_dir=settings.data_dir / "agent_log")
-                    runtime.agent = GeminiAgent(state)
+                    runtime.agent = LiveAgent(state)
+                    runtime.agent.bind_loop(asyncio.get_running_loop())
                 except Exception:  # the demo agent is optional; never block the server
                     log.exception("Voice agent unavailable")
+            # All speech is Gemini TTS served from /api/voice; warm the fixed phrases in the background.
+            runtime.voice = GeminiVoice(settings.data_dir / "voice_cache")
+            if settings.detector != "stub":
+                import threading
+
+                threading.Thread(target=runtime.voice.warm, name="voice-warm", daemon=True).start()
             app.state.runtime = runtime
             log.info(
                 "Server ready: detector=%s, localizer=%s", settings.detector, settings.localizer
@@ -527,6 +538,7 @@ def create_app(
     app.include_router(
         agent_router(lambda: getattr(getattr(app.state, "runtime", None), "agent", None))
     )
+    app.include_router(voice_router(lambda: getattr(getattr(app.state, "runtime", None), "voice", None)))
     app.include_router(spatial_router(settings.data_dir))
 
     @app.get("/")
@@ -671,6 +683,8 @@ def create_app(
         runtime.metrics.connected_at = time.monotonic()
         runtime.metrics.time_to_locked_ms = None
         queue = asyncio.Queue(maxsize=1)
+        voice_queue: asyncio.Queue = asyncio.Queue()
+        send_lock = asyncio.Lock()
         pipeline = None
         tasks = []
 
@@ -681,6 +695,13 @@ def create_app(
                     return
                 received_s = time.monotonic()
                 raw = message.get("bytes")
+                if raw is None and message.get("text") is not None:
+                    # Phone sensor sample (JSON text, ~10 Hz). Never fatal: a bad one is dropped.
+                    imu = parse_imu(message["text"])
+                    if imu is not None and runtime.agent is not None:
+                        runtime.agent.state.on_imu(
+                            received_s, imu["heading_deg"], imu["moving"], imu["steps"], phone_ms=imu["t_ms"])
+                    continue
                 if raw is None:
                     runtime.metrics.invalid += 1
                     await websocket.close(1003, "Send binary JPEG frame packets")
@@ -712,7 +733,15 @@ def create_app(
                     await websocket.close(1011, "Frame processing failed; reconnect to retry")
                     return
                 runtime.publish(item)
-                await asyncio.wait_for(websocket.send_json(item.result), settings.send_timeout_s)
+                async with send_lock:
+                    await asyncio.wait_for(websocket.send_json(item.result), settings.send_timeout_s)
+
+        async def push_voice():
+            # The Live agent's audio, segment by segment, the moment each one exists.
+            while True:
+                msg = await voice_queue.get()
+                async with send_lock:
+                    await asyncio.wait_for(websocket.send_json(msg), settings.send_timeout_s)
 
         try:
             # Start draining the socket before any expensive per-session initialization.
@@ -729,8 +758,13 @@ def create_app(
                 runtime.initial_localizer = None
             runtime.active_localizer = localizer
             if runtime.agent is not None:
-                runtime.agent.state.reset()
-                runtime.agent.reset()
+                # A reconnect keeps the conversation (Live session) and the goal; only the place
+                # window and object memory start over. Old unsent audio is dropped.
+                runtime.agent.state.reset(keep_goal=True)
+                runtime.agent.outbox.clear()
+                runtime.agent.bind_loop(asyncio.get_running_loop())
+                runtime.agent.sink = voice_queue.put_nowait
+                tasks.append(asyncio.create_task(push_voice()))
             pipeline = await runtime.work(
                 Pipeline,
                 settings,
@@ -749,6 +783,8 @@ def create_app(
                 for task in tasks:
                     task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
+                if runtime.agent is not None:
+                    runtime.agent.sink = None  # the Live session stays open for the next connection
                 if pipeline:
                     await runtime.work(pipeline.close)
                 if runtime.warmup:

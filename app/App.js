@@ -1,25 +1,31 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import * as Speech from "expo-speech";
-import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from "expo-audio";
+import { RecordingPresets, createAudioPlayer, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from "expo-audio";
 import * as Location from "expo-location";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
-import { Accelerometer } from "expo-sensors";
+import { Accelerometer, Pedometer } from "expo-sensors";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient } from "./src/client";
 import { createCueSpeaker } from "./src/speech";
 import { runCaptureLoop } from "./src/loop";
 import { encodeFrame } from "./src/protocol";
+import { imuMessage } from "./src/imu";
 import { normalizeServerUrl } from "./src/address";
 import { base64ToBytes } from "./src/base64";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
-import { AUDIO_MODE, speechOptions } from "./src/audio";
+import { AUDIO_MODE } from "./src/audio";
+import { createVoicePlayer } from "./src/voice";
+import { makeLog } from "./src/log";
+
+const logApp = makeLog("app"), logWs = makeLog("ws"), logTalk = makeLog("talk"), logMic = makeLog("mic"),
+  logCam = makeLog("cam"), logVoice = makeLog("voice"), logSpeech = makeLog("speech"), logLoc = makeLog("loc");
 import { attitudeFromGravity, createMotionDetector, smoothGravity } from "./src/attitude";
 import { ackBody, createAckTracker, sendAck, speechAckUrl } from "./src/ack";
 import { PICTURE_OPTIONS, PICTURE_SIZE, SAVE_OPTIONS, resizePlan } from "./src/camera";
-import { RECORD_MODE, agentTalkUrl, postClip, createHoldToTalk } from "./src/talk";
+import { File } from "expo-file-system";
+import { RECORD_MODE, agentQuietUrl, agentTalkUrl, postClip, createHoldToTalk } from "./src/talk";
 import NativeNavigation, { trackingModule } from "./NativeNavigation";
 
 const KEY = "blindsight.server";
@@ -35,7 +41,6 @@ function LegacyApp() {
   const heading = useRef(null);
   const runningRef = useRef(false);
   const client = useRef(null);
-  const speaking = useRef(false);
   const talking = useRef(false); // hold-to-talk: cues stay quiet while the user speaks
   const [talkState, setTalkState] = useState("idle"); // idle | listening | thinking
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -49,12 +54,13 @@ function LegacyApp() {
   const [pitch, setPitch] = useState(null);
   const [moving, setMoving] = useState(null);
   const ackTracker = useRef(createAckTracker());
+  const imuTimer = useRef(null);
 
   useEffect(() => {
     (async () => {
       const saved = await AsyncStorage.getItem(KEY);
       if (saved && !DEFAULT) setAddress(saved);
-      await setAudioModeAsync(AUDIO_MODE).catch((e) => console.log("audio mode", e?.message));
+      await setAudioModeAsync(AUDIO_MODE).catch((e) => logApp("audio mode failed", { error: e?.message }));
       await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
       const loc = await Location.requestForegroundPermissionsAsync();
       if (loc.granted) {
@@ -62,7 +68,7 @@ function LegacyApp() {
           heading.current = h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
         });
       }
-    })().catch((e) => console.log("init", e?.message));
+    })().catch((e) => logApp("init failed", { error: e?.message }));
   }, []);
 
   // Camera pitch and roll from gravity, sent with every frame so the server can check matches.
@@ -80,29 +86,50 @@ function LegacyApp() {
         attitude.current = att && typeof m === "boolean" ? { ...att, moving: m } : att;
         if (now - last > 500 && att) { last = now; setPitch(att.pitch_deg); setMoving(m); }
       });
-    })().catch((e) => console.log("accelerometer", e?.message));
+    })().catch((e) => logApp("accelerometer failed", { error: e?.message }));
     return () => { cancelled = true; sub?.remove(); };
   }, []);
+
+  // Step count from the phone's pedometer, sent with each frame so the server can measure the
+  // distance walked between position fixes. Stays null when the pedometer is not available.
+  const stepCount = useRef(null);
+  useEffect(() => {
+    let sub = null, cancelled = false;
+    (async () => {
+      if (!(await Pedometer.isAvailableAsync()) || cancelled) return;
+      sub = Pedometer.watchStepCount(({ steps }) => { stepCount.current = steps; });
+    })().catch((e) => logApp("pedometer failed", { error: e?.message }));
+    return () => { cancelled = true; sub?.remove(); };
+  }, []);
+
+  // All speech is Gemini TTS audio from the server (/api/voice), played with expo-audio.
+  const wsUrl = useRef(null);
+  wsUrl.current = normalizeServerUrl(address);
+  const voice = useRef(null);
+  if (!voice.current) {
+    voice.current = createVoicePlayer({
+      createPlayer: () => createAudioPlayer(null),
+      getWsUrl: () => wsUrl.current,
+      log: logVoice,
+    });
+  }
 
   const speaker = useRef(
     createCueSpeaker(
       {
         speak: (t, meta) => {
-          Speech.speak(t, speechOptions({
+          voice.current.speak(t, {
             onStart: () => {
-              speaking.current = true;
               // Tell the server speech actually started, so it can measure capture-to-audible latency.
               if (meta?.startup) sendAck(fetch, ackUrl.current, ackBody(null, null));
               else if (meta?.id) sendAck(fetch, ackUrl.current, ackBody(meta.id, ackTracker.current.captureToAudibleMs(meta.id, Date.now())));
             },
-            onSettled: () => (speaking.current = false),
-          }));
-          speaking.current = true;
+          });
         },
-        stop: () => { Speech.stop(); speaking.current = false; },
-        isSpeaking: () => speaking.current || talking.current,
+        stop: () => voice.current.stop(),
+        isSpeaking: () => voice.current.isSpeaking() || talking.current,
       },
-      { log: (m) => console.log(m) },
+      { log: (m) => logSpeech(m) },
     ),
   ).current;
 
@@ -112,15 +139,44 @@ function LegacyApp() {
     await AsyncStorage.setItem(KEY, address);
     if (!perm?.granted) await askPerm();
     await activateKeepAwakeAsync();
-    await setAudioModeAsync(AUDIO_MODE).catch((e) => console.log("audio mode", e?.message));
+    await setAudioModeAsync(AUDIO_MODE).catch((e) => logApp("audio mode failed", { error: e?.message }));
+    logApp("start", { server: url });
     await speaker.startupCheck();
     ackUrl.current = speechAckUrl(url);
+    let wasConnected = null, lastLoc = null, results = 0;
     client.current = createClient({
-      url, speaker, onStatus: setStatus,
-      onResult: (r) => { if (r.cue) ackTracker.current.noteCue(r.cue.id, r.seq); },
+      url, speaker,
+      onStatus: (st) => {
+        if (st.connected !== wasConnected) { logWs(st.connected ? "connected" : "disconnected", { url }); wasConnected = st.connected; }
+        setStatus(st);
+      },
+      onResult: (r) => {
+        if (r.type === "voice") {
+          // The Live agent's voice, streamed as short WAV segments over this socket.
+          logWs("voice segment", { turn: r.turn, seq: r.seq, first: r.first, last: r.last, interrupt: r.interrupt });
+          if (r.url) voice.current.playPath(r.url, { interrupt: r.interrupt });
+          return;
+        }
+        results += 1;
+        if (r.cue) ackTracker.current.noteCue(r.cue.id, r.seq);
+        const loc = r.location ? `${r.location.state} ${r.location.label ?? r.location.pano_id ?? ""}` : null;
+        const agent = r.agent?.decision ? `${r.agent.decision.state} ${r.agent.place_label ?? ""}` : null;
+        const key = `${loc}|${agent}|${r.agent?.nav?.active ?? false}`;
+        if (key !== lastLoc) {
+          logLoc("changed", { localizer: loc, decided: agent, conf: r.agent?.decision?.conf, nav: r.agent?.nav ?? null });
+          lastLoc = key;
+        }
+        if (results % 20 === 0) logWs("frames", { results, server_ms: Math.round(r.server_ms?.total ?? 0), detections: r.detections?.length ?? 0 });
+      },
     });
     client.current.start();
     runningRef.current = true; setRunning(true);
+    // Phone sensors at 10 Hz between frames: the server fuses the compass and steps and re-checks guidance.
+    imuTimer.current = setInterval(() => {
+      try {
+        client.current?.sendJson(imuMessage({ now: Date.now(), heading: heading.current, attitude: attitude.current, steps: stepCount.current }));
+      } catch {}
+    }, 100);
     runCaptureLoop({
       isRunning: () => runningRef.current,
       capture: async () => {
@@ -132,7 +188,7 @@ function LegacyApp() {
         const out = await (await ctx.renderAsync()).saveAsync({ ...SAVE_OPTIONS, format: SaveFormat.JPEG });
         if (!sizeLogged.current) {
           sizeLogged.current = true;
-          console.log(`camera ${p.width}x${p.height} -> sending ${out.width}x${out.height}`);
+          logCam("first frame", { camera: `${p.width}x${p.height}`, sending: `${out.width}x${out.height}` });
         }
         return { bytes: base64ToBytes(out.base64), w: out.width, h: out.height };
       },
@@ -145,23 +201,51 @@ function LegacyApp() {
       getHeading: () => heading.current,
       onFrame: ({ seq, captureStartMs }) => ackTracker.current.noteFrame(seq, captureStartMs),
       getAttitude: () => attitude.current,
-      onTiming: (t) => { if (t.slow) console.log(`slow capture ${t.captureMs} ms: lower quality/size`); },
+      getSteps: () => stepCount.current,
+      onRate: (r) => logCam("frame rate", r),
     });
   }, [address, perm, askPerm, speaker]);
 
   const talkIn = useCallback(async () => {
+    const quietOn = (on) => {
+      const quiet = agentQuietUrl(normalizeServerUrl(addressRef.current), on);
+      if (quiet) fetch(quiet, { method: "POST" }).catch(() => {});
+    };
     if (!talkController.current) talkController.current = createHoldToTalk({
-      prepare: async () => { await Speech.stop(); speaking.current = false;
+      prepare: async () => {
+        const t0 = Date.now();
+        logTalk("button down");
+        voice.current.stop();
+        quietOn(true);
         const p = await requestRecordingPermissionsAsync();
         if (!p.granted) throw Error("microphone permission denied");
-        await setAudioModeAsync(RECORD_MODE); await recorderRef.current.prepareToRecordAsync(); },
-      record: () => recorderRef.current.record(),
-      finish: async () => { await recorderRef.current.stop(); return recorderRef.current.uri; },
+        await setAudioModeAsync(RECORD_MODE); await recorderRef.current.prepareToRecordAsync();
+        logMic("prepared", { ms: Date.now() - t0 });
+      },
+      record: () => { recorderRef.current.record(); logMic("recording"); },
+      finish: async () => {
+        try { await recorderRef.current.stop(); } catch (e) { logMic("stop failed", { error: e?.message }); }
+        const uri = recorderRef.current.uri;
+        logTalk("button up", { file: uri ? uri.split("/").pop() : null });
+        return uri;
+      },
       restore: () => setAudioModeAsync(AUDIO_MODE),
-      send: uri => { const url = agentTalkUrl(normalizeServerUrl(addressRef.current));
-        if (!url) throw Error("Server URL missing"); return postClip(fetch, url, uri); },
+      send: async (uri) => {
+        const url = agentTalkUrl(normalizeServerUrl(addressRef.current));
+        if (!url) throw Error("Server URL missing");
+        logTalk("uploading", { url });
+        const t0 = Date.now();
+        const out = await postClip(fetch, url, uri, { readBytes: (u) => new File(u).bytes() });
+        logTalk("answer", { ms: Date.now() - t0, heard: out.heard, reply: out.reply, tools: out.tools, error: out.error, status: out.status });
+        return out;
+      },
+      // While streaming, the reply already arrives as voice segments over the socket; otherwise play the clip.
+      onResult: (out) => {
+        if (out.url && !runningRef.current) voice.current.playPath(out.url, { interrupt: true });
+        else if (!out.url) speaker.announce(out.reply);
+      },
       announce: text => speaker.announce(text), state: setTalkState,
-      busy: value => { talking.current = value; },
+      busy: value => { talking.current = value; if (!value) quietOn(false); }, // a clip too short to send must not leave the agent muted
     });
     talkController.current.begin();
   }, [speaker]);
@@ -171,7 +255,9 @@ function LegacyApp() {
   }, []);
 
   const stop = useCallback(() => {
+    logApp("stop");
     runningRef.current = false; setRunning(false);
+    clearInterval(imuTimer.current); imuTimer.current = null;
     client.current?.stop();
     deactivateKeepAwake();
   }, []);

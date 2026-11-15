@@ -3,8 +3,9 @@
 Graph: scan points on floor 0 are nodes; two points are joined when they are at most
 MAX_EDGE_M apart and the straight line between them crosses no wall segment from
 data/matterport/walls_floor1.json (FALLBACK_EDGE_M if the goal is unreachable otherwise).
-Route: Dijkstra from the decided place to the goal. Instructions use clock directions
-relative to the user's heading in the mesh frame (x, y on the floor, z up).
+Route: Dijkstra from the decided place to the goal, as a server.route.Route (turns, distances,
+progress). Instructions use clock directions relative to the user's heading in the mesh frame
+(x, y on the floor, z up).
 
 Heading: the localizer's yaw (pano-local, from the matched reference view) turned into the
 mesh frame with the calibrated pano frame (data/matterport/pano_frame.json, the same
@@ -21,13 +22,19 @@ from pathlib import Path
 import numpy as np
 
 from server.minimap import scan_points
+from server.route import STRIDE_M, AROUND_DEG, TURN_DEG, Progress, Route, clock, turn_between
 
 MAX_EDGE_M = 4.0
 FALLBACK_EDGE_M = 6.0
 WAYPOINT_M = 1.0
-NEAR_PLACE_M = 1.5  # trust the tracked position only this close to the decided scan point
-TURN_DEG = 30.0
-REPEAT_S = 6.0
+NEAR_PLACE_M = 1.5  # an unsure tracked position is trusted only this close to the decided scan point
+TRACK_SIGMA_M = 1.5  # a tracked position at least this sure is used wherever it is (and is trusted)
+REPEAT_S = 20.0  # an unchanged instruction is repeated once after this long
+FIVE_M = 5.0  # "In 5 meters, turn left" is said this far before a turn
+NOW_M = 1.5  # "Turn left now" is said this close to a turn
+ARRIVE_M = 1.5  # "You're at the entrance." is said this close to the goal
+TURN_WAIT_S = 6.0  # after "turn now", wait this long (or until turned) before checking the heading
+ARRIVED = "You're at the entrance."
 
 # pano-local (x right, y up, z forward at yaw 0) -> z-up frame; mirrors server/position.py.
 _SWAP = {"a": np.array([[1.0, 0, 0], [0, 0, 1.0], [0, 1.0, 0]]),
@@ -69,14 +76,6 @@ def mesh_heading_deg(M: np.ndarray, yaw_deg: float) -> float:
     psi = math.radians(yaw_deg)
     w = M @ np.array([math.sin(psi), 0.0, math.cos(psi)])
     return math.degrees(math.atan2(w[0], w[1])) % 360
-
-
-def bearing_deg(a: tuple[float, float], b: tuple[float, float]) -> float:
-    return math.degrees(math.atan2(b[0] - a[0], b[1] - a[1])) % 360
-
-
-def clock(turn_deg: float) -> int:
-    return int(math.floor((turn_deg + 15) / 30)) % 12 or 12
 
 
 def clear_line(a, b, walls: np.ndarray) -> bool:
@@ -123,6 +122,49 @@ def shortest_path(graph: dict, start: str, goal: str) -> tuple[list[str], float]
     return None
 
 
+def start_point(emap: "EntranceMap", place: str, position: dict | None) -> tuple[tuple[float, float], str]:
+    """Where the person stands (xy) and the map node to route from.
+
+    The Kalman-tracked position wins when its sigma is at most TRACK_SIGMA_M; the route then starts
+    at the nearest scan point to it (the decided one when that is close). Otherwise the decided scan
+    point, nudged to an unsure tracked position only when that is within NEAR_PLACE_M of it."""
+    pts = emap.points
+    xy = pts[place]
+    if not position or position.get("x") is None:
+        return xy, place
+    p = (float(position["x"]), float(position["y"]))
+    sigma = position.get("sigma_m")
+    if sigma is not None and float(sigma) <= TRACK_SIGMA_M:
+        if math.dist(p, pts[place]) <= NEAR_PLACE_M:
+            return p, place
+        node = min((n for n in pts if n in emap.graph), key=lambda n: math.dist(p, pts[n]), default=place)
+        return p, node
+    if math.dist(p, pts[place]) <= NEAR_PLACE_M:
+        return p, place
+    return xy, place
+
+
+def _trusted(position: dict | None) -> bool:
+    """A metric position good enough to measure progress and off-route with."""
+    if not position or position.get("x") is None or position.get("sigma_m") is None:
+        return False
+    return float(position["sigma_m"]) <= TRACK_SIGMA_M
+
+
+def plan(emap: "EntranceMap", xy, node: str) -> Route | None:
+    """Route from xy (standing next to map node `node`) to the entrance, or None if unreachable."""
+    found = shortest_path(emap.graph, node, emap.goal)
+    if found is None:
+        return None
+    return Route([xy] + [emap.points[n] for n in found[0]])
+
+
+def steps_text(meters: float, stride: float) -> str:
+    """A distance as the person's own steps: easier to judge without sight than metres."""
+    n = max(1, round(meters / max(0.3, stride)))
+    return f"{n} step{'s' if n != 1 else ''}"
+
+
 class EntranceMap:
     """Floor-0 scan points, walls, the walk graph and the pano frames."""
 
@@ -159,113 +201,238 @@ class EntranceMap:
         return self.goal_label if pid == self.goal else self.labels.get(pid, pid)
 
 
+def _first_do(route: Route, heading: float | None) -> str:
+    if heading is None:
+        return "turn slowly in place until told to go"
+    turn = turn_between(heading, route.bearings[0])
+    if abs(turn) <= TURN_DEG:
+        return "go straight"
+    if abs(turn) >= AROUND_DEG:
+        return "turn around"
+    return f"turn {'right' if turn > 0 else 'left'} to your {clock(turn)} o'clock"
+
+
+def _legs(route: Route, heading: float | None, stride: float = STRIDE_M) -> list[dict]:
+    """Walking legs for the agent. The first starts where the person faces (heading); each later
+    one starts with the turn that ends the leg before it."""
+    legs, s0, begin = [], 0.0, None
+    for m in route.maneuvers:
+        legs.append({"do": _first_do(route, heading) if begin is None else begin.say,
+                     "meters": round(m.s - s0, 1), "steps": max(1, round((m.s - s0) / stride))})
+        s0, begin = m.s, m
+    return legs
+
+
+def describe_route(emap: EntranceMap, place: str | None, yaw_deg: float | None = None,
+                   position: dict | None = None, heading_deg: float | None = None,
+                   stride: float = STRIDE_M) -> dict:
+    """The whole path from `place` to the entrance as walking legs, for the agent to explain.
+
+    The same Route the guide follows, so the numbers match the spoken guidance."""
+    pts = emap.points
+    if place is None or place not in pts:
+        return {"ok": False, "reason": "position not known yet; hold the phone steady"}
+    xy, node = start_point(emap, place, position)
+    if node == emap.goal and math.dist(xy, pts[emap.goal]) < WAYPOINT_M:
+        return {"ok": True, "at_destination": True, "total_m": 0.0, "legs": []}
+    route = plan(emap, xy, node)
+    if route is None:
+        return {"ok": False, "reason": "no route to the entrance from here"}
+    heading = None if heading_deg is None else float(heading_deg)
+    M = emap.frames.get(node)
+    if heading is None and yaw_deg is not None and M is not None:
+        heading = mesh_heading_deg(M, yaw_deg)
+    next_turn = route.turns[0] if route.turns else route.maneuvers[-1]
+    return {"ok": True, "destination": emap.goal_label, "total_m": round(route.length, 1),
+            "legs": _legs(route, heading, stride), "heading_known": heading is not None, "stride_m": round(stride, 2),
+            "total_steps": max(1, round(route.length / stride)),
+            "next_turn": emap.goal_label if next_turn.say == "arrive" else next_turn.say,
+            "next_turn_in_m": round(next_turn.s, 1)}
+
+
+def route_sentence(r: dict) -> str:
+    """Compact plain-text form of describe_route() for the agent's context line."""
+    if not r.get("ok"):
+        return r.get("reason", "no route")
+    if r.get("at_destination"):
+        return "already at the entrance"
+    steps = "; then ".join(f"{leg['do']}, about {leg.get('steps', leg['meters'])} steps" for leg in r["legs"])
+    total = r.get("total_steps") or max(1, round(r["total_m"] / STRIDE_M))
+    return f"about {total} steps to {r['destination']}: {steps}"
+
+
+def _side(turn: float) -> str:
+    return "right" if turn > 0 else "left"
+
+
 class EntranceGuide:
-    """Turns the decided place, position and heading into one spoken instruction at a time."""
+    """Spoken guidance to the entrance, one instruction at a time, said at the moments that matter:
+    the heading for the first leg, 5 m and then 1.5 m before each turn, the turn itself, arrival."""
 
     def __init__(self, emap: EntranceMap, repeat_s: float = REPEAT_S):
         self.map = emap
         self.repeat_s = repeat_s
         self.active = False
-        self.route: list[str] = []
-        self.idx = 0
-        self.last_text: tuple | None = None  # (instruction, target) last spoken
+        self.route: Route | None = None
+        self.progress: Progress | None = None
+        self.k = 0  # index of the maneuver being guided to
+        # align: face the leg we are on; walk: going straight; turn: making the turn at maneuver k
+        self.phase = "align"
+        self.said: set[tuple[int, str]] = set()  # distance prompts already spoken, per maneuver
+        self.turn_from: float | None = None  # heading when "turn now" was said
+        self.turn_t = 0.0
+        self.last_text: tuple | None = None  # (instruction, maneuver) last spoken
         self.last_t = -math.inf
+        self.reminded = False
         self.status: dict = {"active": False}
 
     def start(self, start_place: str | None) -> dict:
         if self.map.goal not in self.map.points:
             return {"ok": False, "reason": "no entrance configured on this floor"}
         self.active = True
-        self.route, self.idx, self.last_text, self.last_t = [], 0, None, -math.inf
-        if start_place is not None:
-            self._plan(start_place)
-        self.status = {"active": True, "route": [self.map.label(p) for p in self.route]}
+        self.last_text, self.last_t, self.reminded = None, -math.inf, False
+        self.route, self.progress = None, None
         out = {"ok": True, "destination": self.map.goal_label}
-        if self.route:
-            out.update(waypoints=len(self.route) - 1, distance_m=round(self._remaining(start_place), 1))
+        if start_place is not None and start_place in self.map.points:
+            self._plan(*start_point(self.map, start_place, None))
+        self.status = {"active": True}
+        if self.route is not None:
+            out.update(waypoints=len(self.route.turns), distance_m=round(self.route.length, 1))
         else:
-            out["note"] = "position not known yet; guidance starts when it is"
+            out["note"] = "position not known yet; tell them to hold the phone steady and you'll find the path"
         return out
 
     def stop(self) -> dict:
-        self.active, self.route, self.idx = False, [], 0
+        self.active, self.route, self.progress, self.k = False, None, None, 0
         self.status = {"active": False}
         return {"ok": True}
 
-    def _plan(self, place: str) -> bool:
-        found = shortest_path(self.map.graph, place, self.map.goal)
-        if found is None:
-            self.route, self.idx = [], 0
-            return False
-        self.route, self.idx = found[0], 0
-        return True
-
-    def _remaining(self, place: str | None, xy=None) -> float:
-        if not self.route:
-            return 0.0
-        pts = self.map.points
-        nxt = self.route[min(self.idx + 1, len(self.route) - 1)]
-        here = xy or pts.get(place or self.route[self.idx], pts[self.route[self.idx]])
-        d = math.dist(here, pts[nxt])
-        for a, b in zip(self.route[self.idx + 1:], self.route[self.idx + 2:]):
-            d += math.dist(pts[a], pts[b])
-        return d
+    def _plan(self, xy, node: str) -> bool:
+        self.route = plan(self.map, xy, node)
+        self.progress = Progress(self.route) if self.route is not None else None
+        self.k, self.phase, self.said = 0, "align", set()
+        return self.route is not None
 
     def update(self, t: float, place: str | None, state: str, yaw_deg: float | None,
-               position: dict | None) -> str | None:
-        """Spoken instruction for this frame, or None (nothing new to say)."""
+               position: dict | None, heading_deg: float | None = None,
+               steps: int | None = None, fresh: bool = True) -> str | None:
+        """Spoken instruction for this frame, or None (nothing new to say). heading_deg, when given,
+        is the fused mesh-frame heading (server/heading.py) and wins over yaw_deg. steps is the
+        phone's cumulative step count (pedometer), used between position fixes. fresh=False when
+        position is not a new fix (an IMU sample between frames)."""
         if not self.active:
             return None
-        text = self._instruction(place, state, yaw_deg, position)
+        text = self._instruction(t, place, state, yaw_deg, position, heading_deg, steps, fresh)
         if text is None:
             return None
-        key = (text, self.status.get("next"))  # same words toward a new point are a new instruction
-        if key == self.last_text and t - self.last_t < self.repeat_s:
-            return None
-        if text.startswith("Paused") and self.last_text == key:
+        key = (text, self.k)  # same words toward a new maneuver are a new instruction
+        if text.startswith("Hold the phone steady") and self.last_text == key:
             return None  # say the pause once
-        self.last_text, self.last_t = key, t
-        if text.startswith("You're at"):
+        if self.last_text == key:
+            if self.reminded or t - self.last_t < self.repeat_s:
+                return None
+            self.reminded = True  # one reminder when nothing has changed
+        else:
+            self.last_text, self.reminded = key, False
+        self.last_t = t
+        if text.startswith(ARRIVED[:-1]):
             self.stop()
             self.status = {"active": False, "arrived": True}
         return text
 
-    def _instruction(self, place, state, yaw_deg, position) -> str | None:
+    def _instruction(self, t, place, state, yaw_deg, position, heading_deg, steps, fresh=True) -> str | None:
         pts = self.map.points
         if state == "unknown" or place is None or place not in pts:
             self.status = {**self.status, "paused": True}
-            return "Paused, finding your position. Look around slowly."
-        if place == self.map.goal:
-            return "You're at the entrance."
-        if place not in self.route:
-            if not self._plan(place):
-                return "I can't find a route to the entrance from here."
+            return "Hold the phone steady and I'll find the path."
+        xy, node = start_point(self.map, place, position)
+        if node == self.map.goal:
+            return ARRIVED
+        if self.route is None and not self._plan(xy, node):
+            return "I can't find a route to the entrance from here."
+        trusted = _trusted(position)
+        sigma = float(position["sigma_m"]) if trusted else None
+        self.progress.update(t, xy if trusted else None, sigma, steps, fix=fresh)
+        prefix = ""
+        if self.progress.off_route():
+            if not self._plan(xy, node):
+                return "Let me find a new way. I can't find a route to the entrance from here."
+            prefix = "Let me find a new way. "
+        s = self.progress.s
+        if self.route.length - s <= ARRIVE_M:
+            return ARRIVED
+        M = self.map.frames.get(node)
+        if heading_deg is not None:
+            heading = float(heading_deg)
+        elif yaw_deg is None or M is None:
+            heading = None
         else:
-            self.idx = max(self.idx, self.route.index(place))
-        xy = pts[place]
-        if position and position.get("x") is not None:
-            p = (float(position["x"]), float(position["y"]))
-            if math.dist(p, pts[place]) <= NEAR_PLACE_M:
-                xy = p
-        while self.idx + 1 < len(self.route) - 1 and math.dist(xy, pts[self.route[self.idx + 1]]) < WAYPOINT_M:
-            self.idx += 1
-        goal_xy = pts[self.map.goal]
-        if math.dist(xy, goal_xy) < WAYPOINT_M:
-            return "You're at the entrance."
-        target = self.route[self.idx + 1]
-        dist = math.dist(xy, pts[target])
-        remaining = self._remaining(place, xy)
-        self.status = {"active": True, "at": self.map.label(place), "next": self.map.label(target),
-                       "next_m": round(dist, 1), "remaining_m": round(remaining, 1),
-                       "waypoints_left": len(self.route) - 1 - self.idx}
-        M = self.map.frames.get(place)
-        if yaw_deg is None or M is None:
+            heading = mesh_heading_deg(M, yaw_deg)
+        text = self._step(t, s, heading)
+        self.status = self._status(s, heading)
+        return None if text is None else prefix + text
+
+    def _target(self, s: float) -> float:
+        """Bearing the person should face: the leg they are on, or the leg after a turn."""
+        m = self.route.maneuvers[self.k]
+        if self.phase == "turn":
+            return self.route.bearings[m.seg]
+        return self.route.bearings[self.route.segment_at(s)]
+
+    def _step(self, t: float, s: float, heading: float | None) -> str | None:
+        """The instruction for the current phase, or None when there is nothing new to say."""
+        m = self.route.maneuvers[self.k]
+        if self.phase == "walk":
+            if m.say == "arrive":
+                return None
+            d = m.s - s
+            if d <= NOW_M and (self.k, "now") not in self.said:
+                self.said.add((self.k, "now"))
+                self.phase, self.turn_from, self.turn_t = "turn", heading, t
+                return f"{m.say[0].upper()}{m.say[1:]} now."
+            if d <= FIVE_M and (self.k, "five") not in self.said:
+                self.said.add((self.k, "five"))
+                return f"In about {steps_text(d, self.stride)}, {m.say}."
+            return None
+        if heading is None:
             return "Turn slowly in place until I tell you to go."
-        heading = mesh_heading_deg(M, yaw_deg)
-        turn = (bearing_deg(xy, pts[target]) - heading + 180) % 360 - 180
-        self.status.update(heading_deg=round(heading), turn_deg=round(turn))
+        turn = turn_between(heading, self._target(s))
+        turned = TURN_DEG + 1  # unknown start heading: judge the turn as done
+        if self.phase == "turn" and self.turn_from is not None:
+            turned = abs(turn_between(self.turn_from, heading))
+            if turned < TURN_DEG and t - self.turn_t < TURN_WAIT_S:
+                return None  # give the turn time before judging it
         if abs(turn) > TURN_DEG:
-            side = "right" if turn > 0 else "left"
-            return f"Turn {side}, to your {clock(turn)} o'clock."
-        meters = max(1, round(dist))
-        return f"Go straight, about {meters} meter{'s' if meters != 1 else ''}."
+            if self.phase == "align" or turned < TURN_DEG:
+                return f"Turn {_side(turn)}, to your {clock(turn)} o'clock."
+            return f"Turn a bit more to your {_side(turn)}, to your {clock(turn)} o'clock."
+        if self.phase == "turn":
+            self.k += 1  # the turn is done: on to the next maneuver
+        self.phase = "walk"
+        return self._leg_text(s)
+
+    def _leg_text(self, s: float) -> str:
+        m = self.route.maneuvers[self.k]
+        if m.s - s <= FIVE_M + 1.0:
+            self.said.add((self.k, "five"))  # the leg text already says how close the turn is
+        dist = steps_text(m.s - s, self.stride)
+        if m.say == "arrive":
+            return f"Go straight about {dist} to the entrance."
+        return f"Go straight about {dist}, then {m.say}."
+
+    @property
+    def stride(self) -> float:
+        """Metres per step: the pedometer stride calibrated against position fixes, else the default."""
+        return self.progress.stride if self.progress is not None else STRIDE_M
+
+    def _status(self, s: float, heading: float | None) -> dict:
+        m = self.route.maneuvers[self.k]
+        out = {"active": True, "next": "the entrance" if m.say == "arrive" else m.say,
+               "next_m": round(max(0.0, m.s - s), 1), "remaining_m": round(max(0.0, self.route.length - s), 1),
+               "waypoints_left": len(self.route.maneuvers) - self.k,
+               "next_steps": max(0, round(max(0.0, m.s - s) / self.stride)),
+               "remaining_steps": max(0, round(max(0.0, self.route.length - s) / self.stride)),
+               "stride_m": round(self.stride, 2)}
+        if heading is not None:
+            out.update(heading_deg=round(heading), turn_deg=round(turn_between(heading, self._target(s))))
+        return out

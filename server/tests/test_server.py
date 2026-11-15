@@ -116,18 +116,31 @@ def test_latest_wins_and_event_loop_remains_responsive(settings, packet):
             assert client.get("/metrics").json()["dropped"] >= 28
 
 
+@pytest.mark.timeout(30)
 def test_bad_packets_and_reconnect(settings, packet):
     with TestClient(create_app(settings)) as client:
-        for bad in (b"bad", "text"):
-            with client.websocket_connect("/ws/phone") as phone:
-                phone.send_bytes(bad) if isinstance(bad, bytes) else phone.send_text(bad)
-                with pytest.raises(WebSocketDisconnect):
-                    phone.receive_json()
+        with client.websocket_connect("/ws/phone") as phone:
+            phone.send_bytes(b"bad")  # a broken frame closes the socket and counts as invalid
+            with pytest.raises(WebSocketDisconnect):
+                phone.receive_json()
         for seq in range(10):
             with client.websocket_connect("/ws/phone") as phone:
                 phone.send_bytes(packet(seq))
                 assert phone.receive_json()["seq"] == seq
-        assert client.get("/metrics").json()["invalid"] == 2
+        assert client.get("/metrics").json()["invalid"] == 1
+
+
+@pytest.mark.timeout(30)
+def test_text_messages_are_phone_sensor_samples_and_never_close_the_socket(settings, packet):
+    """Text is the phone's IMU stream. Garbage text is dropped; the connection keeps working."""
+    with TestClient(create_app(settings)) as client:
+        with client.websocket_connect("/ws/phone") as phone:
+            phone.send_text("text")
+            phone.send_text('{"type": "imu", "heading_deg": 90, "moving": false, "steps": 3}')
+            phone.send_text('{"type": "imu", "heading_deg": "north"}')
+            phone.send_bytes(packet(5))
+            assert phone.receive_json()["seq"] == 5
+        assert client.get("/metrics").json()["invalid"] == 0
 
 
 def test_only_one_phone_and_fresh_state_on_reconnect(settings, packet):

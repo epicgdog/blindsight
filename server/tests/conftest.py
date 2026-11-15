@@ -1,3 +1,7 @@
+import os
+
+# The Live voice agent needs a Gemini key and network; server tests exercise the cue-engine path.
+os.environ.setdefault("AGENT", "0")
 import io
 
 import pytest
