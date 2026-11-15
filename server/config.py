@@ -21,7 +21,9 @@ PORT = int(os.getenv("PORT", "8000"))
 HFOV_DEG = float(os.getenv("HFOV_DEG", "55"))
 YOLO_CONF = float(os.getenv("YOLO_CONF", "0.35"))
 YOLO_IMGSZ = int(os.getenv("YOLO_IMGSZ", "640"))
-EMBED_EVERY_N_FRAMES = int(os.getenv("EMBED_EVERY_N_FRAMES", "3"))
+# 1 = fresh retrieval every frame (DINOv2-small is ~10 ms); 3 reused stale similarities for two
+# frames in three, which hid the right view while turning.
+EMBED_EVERY_N_FRAMES = int(os.getenv("EMBED_EVERY_N_FRAMES", "1"))
 COOLDOWN_S = float(os.getenv("COOLDOWN_S", "5"))
 MIN_GAP_S = float(os.getenv("MIN_GAP_S", "1.5"))
 RECORD = env_bool("RECORD")

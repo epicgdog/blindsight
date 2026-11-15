@@ -157,7 +157,7 @@ class Settings:
     PLACE_RATIO: float = 1.5
     LOCK_NEED: int = 2  # 2 of the last 3 frames; fallback "require 3 of 3" sets 3
     HFOV_DEG: float = 55.0  # Part 1 base config
-    EMBED_EVERY_N_FRAMES: int = 3  # Part 1 base config
+    EMBED_EVERY_N_FRAMES: int = 1  # Part 1 base config; >1 reuses stale similarities between frames
     LOST_AFTER: int = 5
     matcher: str = "auto"
     retriever: str = "auto"
@@ -529,6 +529,11 @@ class Cand:
     pitch: float | None = None
     roll: float | None = None
     ms: float = 0.0
+    # Who proposed this view: "retrieval" (global embedding, gated by T_LO), "bow" (local-feature
+    # vocabulary) or "extra" (predicted yaw, tracked place). Only retrieval's proposals are gated by
+    # similarity: the others were never chosen for it, and a stale or weak similarity must not
+    # throw away a view that geometry verified.
+    via: str = "retrieval"
 
 
 @dataclass
@@ -544,7 +549,7 @@ class FrameEval:
     verifs: dict = field(default_factory=dict, repr=False)  # ref idx -> Verification, not serialized
 
     def best_demo(self, t_lo: float = -2.0) -> Cand | None:
-        c = [c for c in self.cands if c.demo and c.sim >= t_lo]
+        c = [c for c in self.cands if c.demo and (c.sim >= t_lo or c.via != "retrieval")]
         return max(c, key=lambda c: (c.inliers, c.grid)) if c else None
 
     def best_comp_inliers(self) -> int:
@@ -1034,18 +1039,22 @@ class Localizer:
                              total_ms=(t3 - t0) * 1000, sims=sims)
         feats = extract_features(self.matcher, img, boxes)
         bow = self._bow.query(feats)
-        for i in self._top(bow, demo_mask, TOPK_DEMO_BOW) + list(extra_demo or ()):
-            if i is not None and i not in demo_ids:
-                demo_ids.append(i)
+        via = {i: "retrieval" for i in demo_ids}
+        for src, ids in (("bow", self._top(bow, demo_mask, TOPK_DEMO_BOW)), ("extra", list(extra_demo or ()))):
+            for i in ids:
+                if i is not None and i not in via:
+                    via[i] = src
+                    demo_ids.append(i)
         t3 = time.perf_counter()
         K_live = intrinsics(w, h, self.s.HFOV_DEG)
         verifs: dict = {}
-        cands = [self._verify(i, sims[i], feats, K_live, verifs) for i in demo_ids]
+        cands = [replace(self._verify(i, sims[i], feats, K_live, verifs), via=via[i]) for i in demo_ids]
         best = max(cands, key=lambda c: (c.inliers, c.grid), default=None)
         run_comp = competitors == "always" or (
             best is not None and best.inliers >= self.s.N_MIN and best.grid >= self.s.GRID_CELLS_MIN)
         if run_comp and self.competitors:
-            cands += [self._verify(i, sims[i], feats, K_live) for i in self._top(bow, ~self._is_demo, TOPK_COMP)]
+            cands += [replace(self._verify(i, sims[i], feats, K_live), via="bow")
+                      for i in self._top(bow, ~self._is_demo, TOPK_COMP)]
         t4 = time.perf_counter()
         return FrameEval(
             cands,
