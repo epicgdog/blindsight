@@ -541,6 +541,7 @@ def create_app(
     async def health():
         return {
             "status": "ok",
+            "voice_agent_api_version": 2,
             "detector": settings.detector,
             "localizer": settings.localizer,
             "localization_scope": settings.localization_scope
