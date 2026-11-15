@@ -53,7 +53,7 @@ On the phone: install **Expo Go**, scan the QR that Expo prints, then tap **Allo
 | `scripts/tunnel.sh --dry-run` | print the address and QR only; do not start Expo |
 | `uv run pytest` | Python integration tests (boots the stand-in server, drives node and Chrome) |
 | `node --test "app/test/unit/*.test.js" "server/viewer/test/*.test.js"` | JS unit tests |
-| `uv run python3 slides/build_deck.py` | build `slides/blindsight.pptx` |
+| `uv run python3 slides/build_deck.py` | build `slides/blindsight.pptx` (8 slides, speaker notes; `--presenting` adds local images from `data/` into the git-ignored `slides/blindsight-presenting.pptx`; see `slides/demo_runbook.md`) |
 | `uv run python3 tools/render_backup_video.py --out slides/backup.mp4` | render the backup video (`--seconds`, `--fps`) |
 | `make -f make/part2.mk <target>` | `part2-echo`, `part2-tunnel`, `part2-test`, `part2-app-test`, `part2-video`, `part2-slides` |
 
