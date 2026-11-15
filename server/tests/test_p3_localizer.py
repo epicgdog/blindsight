@@ -244,10 +244,13 @@ def test_every_pano_is_a_candidate_place_in_multi_mode(multi):
     assert set(multi.candidate_places) == set(IDS)
     assert all(r.demo for r in multi._refs if r.view.source == "pano")
     assert multi.competitors == []  # nothing left to be only a distractor
+    assert multi.info()["indexed_scans"] == len(IDS)
+    assert set(multi.info()["scan_ids"]) == set(IDS)
 
 
 def test_single_mode_keeps_one_candidate_place(loc):
     assert loc.candidate_places == ["room_p0"]
+    assert loc.info()["indexed_scans"] == 1
 
 
 def _lock_at(L, room, pid, yaw0=200, n=6):
@@ -286,6 +289,8 @@ def test_place_switches_after_consistent_frames(multi, room):
     for i in range(8):
         gt = 220 + 6 * i
         out = multi.update(frame(room, "room_p3", gt), [], (gt + 77.0) % 360)
+        assert out.pano_id in {"room_p0", "room_p3"}, "nearby look-alikes must not replace the stronger true match"
+        assert multi.tracker.place in {"room_p0", "room_p3"}
     assert out.pano_id == "room_p3" and out.state == LOCKED
 
 

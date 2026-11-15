@@ -80,3 +80,33 @@ def test_reset_and_unrelated_image_never_retain_old_location(scene):
     result = localizer.update(np.zeros((480, 360, 3), dtype=np.uint8), [], None)
     assert result.pano_id is None and result.state != "LOCKED"
     assert localizer.add_reference(np.zeros((480, 360, 3), dtype=np.uint8)) is False
+    assert localizer.last_debug["matched"] is False
+    assert localizer.last_debug["match"]["heading_obs"] is None
+
+
+def test_property_recognition_supplies_voice_place_and_heading(scene, tmp_path):
+    import numpy as np
+
+    from server.agent import AgentState
+    from server.entrance_nav import EntranceGuide, EntranceMap
+    from server.heading import HeadingKalman
+
+    room, localizer = scene
+    localizer.reset()
+    state = AgentState(tmp_path, entrance="room_p3")
+    points = {p: (float(pos3(p)[0]), float(pos3(p)[2])) for p in localizer.scan_ids}
+    axes = {p: np.array([[1.0, 0, 0], [0, 0, 1.0], [0, 1.0, 0]]) for p in points}
+    state.map = EntranceMap(points, {p: p for p in points}, np.zeros((0, 4)), axes, goal="room_p3")
+    state.guide = EntranceGuide(state.map)
+    state.heading = HeadingKalman(axes)
+    state.place_label = state.map.label
+    for i in range(4):
+        image = room.render(pos3("room_p0"), 30 + i, 0, 0, (360, 480), 55)
+        location = localizer.update(image, [], None)
+        debug = localizer.last_debug
+        match = debug["match"] if debug["matched"] else None
+        state.on_frame(float(i), match, [], location.to_dict())
+    assert state.tool("get_location", {})["place"] == "room_p0"
+    assert state.heading.estimate["heading_deg"] is not None
+    out = state.tool("start_navigation", {})
+    assert out["navigation_ready"] and out["instruction"]

@@ -20,7 +20,7 @@ test("a full iPhone photo would exceed the limit (the bug this prevents)", () =>
 
 test("picture options keep the loop fast and the payload bytes available", () => {
   assert.equal(PICTURE_OPTIONS.base64, false); // bytes come from the resize step instead
-  assert.equal(PICTURE_OPTIONS.exif, false);
+  assert.equal(PICTURE_OPTIONS.exif, true); // focal length/lens metadata calibrates localization intrinsics
   assert.equal(PICTURE_OPTIONS.skipProcessing, false);
 });
 

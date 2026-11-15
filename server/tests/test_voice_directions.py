@@ -96,6 +96,15 @@ def test_direction_changes_when_user_turns(tmp_path):
     assert out["instruction"].startswith("Go straight about")
 
 
+def test_old_arrival_cannot_override_a_new_location(tmp_path):
+    state = located(tmp_path)
+    state.guide.status = {"active": False, "arrived": True}
+    out = state.tool("get_direction", {})
+    assert not out.get("at_destination")
+    assert out["navigation_ready"]
+    assert "Turn right" in out["instruction"]
+
+
 @pytest.mark.parametrize("destination", ["bathroom", "south staircase", "outdoor kitchen"])
 def test_unsupported_destination_is_not_claimed_as_started(tmp_path, destination):
     state = located(tmp_path)

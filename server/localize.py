@@ -1129,10 +1129,11 @@ class Localizer:
             if embed_now:
                 self._sims = fe.sims
             margin = MULTI_MARGIN if self.multi else None
-            # Filter first, then pick: candidates the phone's pitch, the position track or the
-            # standing-still hold rule rule out are dropped, and the best of the rest is chosen.
+            # Pitch/still constraints can rule out a candidate before matching. Distance from the
+            # track cannot: deleting the strongest far match promotes a weaker nearby look-alike
+            # and prevents recovery. Let the tracker gate the geometrically winning measurement.
             verdicts = self._screen(fe, pitch_deg, moving, still) if self.mode != "retrieval" else {}
-            kept = replace(fe, cands=[c for c in fe.cands if c.idx not in verdicts])
+            kept = replace(fe, cands=[c for c in fe.cands if verdicts.get(c.idx) in (None, "far")])
             matched, best = kept.decide(self.s, self.mode, margin)
             screened = matched
             if not matched:
@@ -1460,6 +1461,8 @@ class Localizer:
         return {
             "pano_id": self.pano_id, "label": self.label, "mode": self.mode,
             "candidate_places": self.candidate_places,
+            "scope": "multi" if self.multi else "single",
+            "indexed_scans": len(self.candidate_places), "scan_ids": sorted(self.candidate_places),
             "n_refs": int(self._is_pano_demo.sum()), "n_onsite": self.n_onsite,
             "competitors": self.competitors, "n_competitor_refs": int((~self._is_demo).sum()),
             "matcher": self.matcher.name, "retriever": self.embedder.name,

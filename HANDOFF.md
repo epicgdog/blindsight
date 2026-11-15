@@ -1,5 +1,30 @@
 # Handoff: Gemini Live voice agent (2026-11-14, evening session)
 
+## November 15 regression and localization follow-up
+
+The failures described in the earlier audit below have been repaired. The latest
+verification is recorded in `REGRESSION-RESULTS.md`.
+
+- A distant strong geometric match remains eligible for the tracker's distance
+  gate. It cannot be replaced by a weaker nearby look-alike merely because the
+  current track is wrong. Jump rejection, still-phone holds, distinctive-feature
+  checks, and repeated-fix recovery remain enabled.
+- Property-wide recognition now publishes verified `match.ranking`, `matched`,
+  and `heading_obs`, allowing the voice agent to acquire both place and heading.
+  The older workaround claiming property mode cannot feed the agent is obsolete.
+- Indexed scan counts now reflect the actual candidate set in the legacy engine,
+  rather than the API's default count of one. `LOCALIZATION_SCOPE=single` selects
+  that engine; `CANDIDATE_PLACES=all` can still index multiple scans within it.
+- Camera tests require EXIF focal/lens metadata, and viewer/browser tests cover
+  the current ranking/2D/3D map layout rather than removed panorama/cue panels.
+- An old arrival flag no longer overrides a newly established location elsewhere.
+
+For full property mode use `LOCALIZER=real LOCALIZATION_SCOPE=property AGENT_EVENTS=all`;
+the downloaded panoramas and calibration assets must be available on the serving
+laptop. Restart FastAPI after pulling, especially when using `server.devserver`,
+which retains localization modules until a full restart. Local assets and API keys
+remain ignored by Git. A passing simulated route is not an on-site walkthrough.
+
 ## November 15 voice-direction repair
 
 Navigation tools now return a current `instruction` and `navigation_ready` flag.

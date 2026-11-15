@@ -88,7 +88,7 @@ export const pickRows = (match, info = {}) =>
   }));
 
 // Candidate screening before the pick (server/localize.py _screen).
-export const VERDICT = { kept: "kept", pitch: "ruled out: pitch vs phone", far: "ruled out: too far from track", still: "ruled out: standing still" };
+export const VERDICT = { kept: "kept", pitch: "ruled out: pitch vs phone", far: "requires tracker distance check", still: "ruled out: standing still" };
 
 // Plain-language reasons this frame was not accepted, from the localizer's debug block.
 export function whyLines(d) {

@@ -30,6 +30,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from server.cues import HAZARDS
 from server.entrance_nav import (
+    ARRIVE_M,
     EntranceGuide,
     EntranceMap,
     describe_route,
@@ -410,9 +411,13 @@ class AgentState:
             if self.guide.active:
                 instruction = self.guide.update(now, d.place, d.state, self._guidance_yaw(now), self.position,
                                                 est.get("heading_deg"), fresh=False)
-            if self.guide.status.get("arrived"):
+            xy, _ = start_point(self.map, d.place, self.position) if d.place in self.map.points else (None, None)
+            goal = self.map.points.get(self.map.goal)
+            if self.guide.status.get("arrived") and xy is not None and goal is not None and math.dist(xy, goal) <= ARRIVE_M:
                 return {"ok": True, "at_destination": True, "navigation_ready": False,
                         "instruction": "You're at the entrance."}
+            if self.guide.status.get("arrived"):
+                self.guide.status = {"active": self.guide.active}
             guided = self.guide.active and self.guide.route is not None
             nav = dict(self.guide.status)
             fresh = None if guided else describe_route(self.map, d.place, self._guidance_yaw(now), self.position,

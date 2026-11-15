@@ -26,7 +26,7 @@ from server.geometry import (
     movable_boxes_px,
     normalize_contrast,
 )
-from server.localize import ONSITE_NEG, PHOTO_EXT, Location, RefView, _Ref
+from server.localize import ONSITE_NEG, PHOTO_EXT, Location, RefView, _Ref, heading_observation
 from server.localize import Localizer as SingleLocalizer
 
 PLACES_DIR = ("onsite", "places")  # under the data directory
@@ -355,8 +355,33 @@ class Localizer(SingleLocalizer):
                     reason = "waiting_for_consistent_frames"
             place = winner.place if winner is not None and state == "LOCKED" else None
             label = self.place_label(place)
+            # Both localization engines must publish the same verified evidence to the voice
+            # agent. Rankings alone identify a scan; heading_obs calibrates its map-frame heading.
+            best_by_place = {}
+            for candidate in candidates:
+                previous = best_by_place.get(candidate.place)
+                if previous is None or candidate.inliers > previous.inliers:
+                    best_by_place[candidate.place] = candidate
+            ranking = [
+                {
+                    "place": c.place,
+                    "inliers": int(c.inliers),
+                    "sim": float(c.sim),
+                    "ref": int(c.idx),
+                }
+                for c in sorted(best_by_place.values(), key=lambda c: -c.inliers)
+            ]
+            matched = place is not None
+            match = {
+                "ranking": ranking,
+                "heading_obs": heading_observation(matched, winner, None),
+                "pano": place,
+                "best_ref": int(winner.idx) if winner is not None else None,
+            }
             self.last_debug = dict(
                 scope="property",
+                matched=matched,
+                match=match,
                 selected_scan_only=False,
                 indexed_scans=len(self.scan_ids),
                 indexed_scan_ids=self.scan_ids,

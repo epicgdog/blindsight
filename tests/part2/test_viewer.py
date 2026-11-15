@@ -17,9 +17,9 @@ def test_viewer_has_no_masking_ui():
         assert word not in html, word
 
 
-def test_ranking_and_footprint_panels_present():
+def test_ranking_and_map_panels_present():
     html = (VIEWER / "index.html").read_text()
-    for el in ("rank-list", "cmp-live", "cmp-top", "pano-map", "equirect", "footprint", "minimap", "mm-floor", "mm-place"):
+    for el in ("rank-list", "cmp-live", "cmp-top", "picks", "why", "map3d", "minimap", "mm-floor", "mm-place"):
         assert f'id="{el}"' in html, el
 
 
@@ -38,7 +38,7 @@ def test_no_external_requests():
 def test_required_panels_present():
     html = (VIEWER / "index.html").read_text()
     for el in ("live-frame", "boxes", "state-badge", "score", "sparkline", "ref-strip",
-               "inliers", "yaw", "cue-log", "latency", "fps",
+               "inliers", "yaw", "latency", "fps",
                "btn-pos", "btn-neg", "btn-warmup", "warmup-progress"):
         assert f'id="{el}"' in html, el
 
@@ -61,14 +61,15 @@ def test_viewer_renders_live_state_in_headless_chrome(server):
     )
     dom = r.stdout
     assert re.search(r'id="state-badge"[^>]*>\s*LOCKED', dom), dom[:2000]
-    assert re.search(r'id="cue-log".*main lobby', dom, re.S | re.I)
+    assert re.search(r'id="rank-list".*Hallway', dom, re.S)
+    assert re.search(r'id="cmp-live"[^>]*src="data:image/jpeg', dom)
     assert re.search(r'id="inliers"[^>]*>[^<]*\d', dom)
 
 
 @pytest.mark.browser
 @pytest.mark.skipif(not __import__("os").path.exists(CHROME), reason="needs Chrome")
-def test_viewer_renders_live_pano_ranking_and_footprint(server):
-    """Echo server pushes a canned match; the viewer must rank places and draw the box."""
+def test_viewer_renders_live_pano_ranking_and_map(server):
+    """Echo server pushes a canned match; rank it and draw the mapped location."""
     r = subprocess.run(
         [CHROME, "--headless=new", "--disable-gpu", "--no-sandbox",
          "--virtual-time-budget=9000", "--dump-dom", server["base"] + "/?demo=1"],
@@ -80,7 +81,7 @@ def test_viewer_renders_live_pano_ranking_and_footprint(server):
     assert 'rank-row here' in dom  # the locked pano is marked
     names = re.findall(r'class="rank-name"[^>]*>([^<]+)<', dom)
     assert names[0] == "Hallway · scan 0" and "Other / Hallway · scan 34" in names
-    assert re.search(r'id="footprint".*<polygon', dom, re.S)
+    assert re.search(r'id="minimap".*class="mm-dot mm-active"', dom, re.S)
     assert re.search(r'id="cmp-live"[^>]*src="data:image/jpeg', dom)
     assert "mask-layer" not in dom and "ignored" not in dom  # no masking overlay
 
