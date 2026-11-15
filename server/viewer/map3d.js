@@ -40,7 +40,11 @@ export function createMap3d(host) {
     new THREE.LineBasicMaterial({ color: COLORS.active }),
   );
   ring.visible = beam.visible = false;
-  scene.add(ring, beam);
+  // Facing arrow: map heading clockwise from +y (north); toThree maps (x, y) to (x, -y), so the
+  // direction is (sin h, 0, -cos h).
+  const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(), 1.8, 0xff4fd8, 0.6, 0.35);
+  arrow.visible = false;
+  scene.add(ring, beam, arrow);
 
   function place() {
     const s = Math.sin(view.phi);
@@ -194,6 +198,13 @@ export function createMap3d(host) {
       const c = hot.kind === "active" ? COLORS.active : COLORS.estimate;
       ring.material.color.setHex(c); beam.material.color.setHex(c);
       if (hot.id !== focusId) { focusId = hot.id; goal.copy(top); goal.y = s.ground_z + 1; }
+    }
+    const from = s.points.find((p) => p.kind === "you") ?? hot;
+    arrow.visible = !!from && Number.isFinite(s.heading_deg);
+    if (arrow.visible) {
+      const h = (s.heading_deg * Math.PI) / 180;
+      arrow.position.copy(toThree(from.x, from.y, from.z));
+      arrow.setDirection(new THREE.Vector3(Math.sin(h), 0, -Math.cos(h)));
     }
     host.dataset.points = String(s.points.length);
     host.dataset.active = hot?.kind === "active" ? hot.id : "";

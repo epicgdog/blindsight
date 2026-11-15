@@ -438,8 +438,13 @@ class AgentState:
     def snapshot(self) -> dict:
         with self.lock:
             self.decision = self.window.decide(self.t + time.monotonic() - self._received_at)
+            est = self.heading.estimate
+            heading = {"heading_deg": est.get("heading_deg"), "sigma_deg": est.get("sigma_deg"),
+                       "source": est.get("source"),
+                       # raw phone compass (magnetic/true north, not the map frame), for comparison
+                       "compass_deg": self._compass_buf[-1][1] if self._compass_buf else None}
             return {"decision": self.decision.to_dict(), "place_label": self.place_label(self.decision.place),
-                    "nav": self.guide.status}
+                    "nav": self.guide.status, "heading": heading}
 
     # -- tools -----------------------------------------------------------------
     def tool(self, name: str, args: dict, describe=None) -> dict:

@@ -171,6 +171,26 @@ export function mapMarkers(map, activeId, ranking, trail, w, h, position = null)
   return { floor, name: active ? scanName(active) : "", markers };
 }
 
+// ---- facing arrow ----
+// heading_deg is the fused map-frame heading (server/heading.py): clockwise from +y (north, up on
+// the map). Both maps flip y, so on the SVG the direction is (sin h, -cos h).
+export function headingArrow(x, y, headingDeg, len) {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(headingDeg)) return null;
+  const h = (headingDeg * Math.PI) / 180;
+  const dx = Math.sin(h), dy = -Math.cos(h);
+  const tip = [x + dx * len, y + dy * len];
+  const wing = len * 0.35, back = len * 0.6;
+  const l = [x + dx * back - dy * wing, y + dy * back + dx * wing];
+  const r = [x + dx * back + dy * wing, y + dy * back - dx * wing];
+  const f = (p) => `${+p[0].toFixed(2)},${+p[1].toFixed(2)}`;
+  return { line: [x, y, ...tip].map((v) => +v.toFixed(2)), head: `${f(tip)} ${f(l)} ${f(r)}` };
+}
+
+export const headingText = (h) =>
+  !h ? "" : Number.isFinite(h.heading_deg)
+    ? `facing ${Math.round(h.heading_deg)}° ±${h.sigma_deg ?? "?"}° (${h.source ?? "?"})`
+    : Number.isFinite(h.compass_deg) ? `facing unknown (compass ${Math.round(h.compass_deg)}°, not calibrated to the map yet)` : "facing unknown";
+
 // ---- readouts and errors ----
 export const yawText = (yaw) => (Number.isFinite(yaw) ? `${Math.round(yaw)}°` : "–");
 
@@ -230,7 +250,7 @@ export const WALL_HEIGHT_M = 2.5;
 // Scan point at the building entrance (scan 28), found by standing at the door with the phone.
 export const ENTRANCE_ID = "n0ppizy9u8xcadypd2bawceyc";
 
-export function scene3d(map, activeId, ranking, trail, position = null) {
+export function scene3d(map, activeId, ranking, trail, position = null, headingDeg = null) {
   if (!map?.points?.length) return null;
   const ranked = (ranking ?? []).map((r) => r.place);
   const activePoint = map.points.find((p) => p.id === activeId);
@@ -263,5 +283,6 @@ export function scene3d(map, activeId, ranking, trail, position = null) {
     wall_height: WALL_HEIGHT_M,
     center: { x: +cx.toFixed(2), y: +cy.toFixed(2), z: +(ground + 1).toFixed(2) },
     focus: focus ? { id: focus.id, name: scanName(focus), floor: focus.floor ?? 0, otherFloor: focus.floor !== 0 } : null,
+    heading_deg: Number.isFinite(headingDeg) ? headingDeg : null,
   };
 }

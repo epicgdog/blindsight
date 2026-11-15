@@ -53,6 +53,8 @@ h2 { margin:0 0 6px; font-size:22px; }
 #picks figcaption { color:var(--dim); font-size:15px; margin-top:4px; overflow-wrap:anywhere; }
 #why { margin:10px 0 0; padding-left:20px; font-size:16px; color:var(--dim); }
 .mm-dot.mm-you { fill:#fff; stroke:var(--ok); stroke-width:4; }
+.mm-arrow { stroke:#ff4fd8; stroke-width:5; vector-effect:non-scaling-stroke; stroke-linecap:round; }
+.mm-arrow-head { fill:#ff4fd8; }
 
 #mm-floor { color:var(--dim); font-size:20px; font-weight:400; margin-left:8px; }
 #minimap { width:100%; max-height:420px; background:#222633; border-radius:8px; }

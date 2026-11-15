@@ -1,4 +1,4 @@
-import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, mapMarkers, scene3d, pushTrail, yawText, errorText, frameMatch, pickRows, whyLines } from "./logic.js";
+import { stateClass, pushHistory, sparklinePoints, boxStyle, appendCue, fpsFromTimes, refStrip, clock, rankRows, mapMarkers, scene3d, pushTrail, yawText, errorText, frameMatch, pickRows, whyLines, headingArrow, headingText } from "./logic.js";
 
 const $ = (id) => document.getElementById(id);
 let history = [], cueLog = [], times = [], faces = [], placeInfo = {}, mapData = null, trail = [], lastResult = null, map3d = null, view3d = true;
@@ -133,15 +133,28 @@ function renderMinimap(r) {
     c.setAttribute("r", ({ active: 12, estimate: 11, you: 9, point: 5 }[m.kind] ?? 8) * scale);
     nodes.push(c);
   }
+  // Facing arrow from where we are: tracked position, else the locked or estimated scan point.
+  const heading = r.agent?.heading ?? null;
+  const at = markers.find((m) => m.kind === "you") ?? markers.find((m) => m.kind === "active") ?? markers.find((m) => m.kind === "estimate");
+  const arrow = at && headingArrow(at.x, at.y, heading?.heading_deg, 34 * scale);
+  if (arrow) {
+    const line = document.createElementNS(NS, "line");
+    const [x1, y1, x2, y2] = arrow.line;
+    Object.entries({ x1, y1, x2, y2, class: "mm-arrow" }).forEach(([k, v]) => line.setAttribute(k, v));
+    const head = document.createElementNS(NS, "polygon");
+    head.setAttribute("points", arrow.head); head.setAttribute("class", "mm-arrow-head");
+    nodes.push(line, head);
+  }
   svg.replaceChildren(...nodes);
   if (map3d) {
-    map3d.update(scene3d(mapData, active, match?.ranking, trail, position));
+    map3d.update(scene3d(mapData, active, match?.ranking, trail, position, heading?.heading_deg));
     $("mini-panel").classList.toggle("is3d", view3d);
   }
   $("mm-floor").textContent = floor == null ? "" : `Floor ${floor + 1}`;
   const tag = otherFloor ? " (another floor)" : active ? "" : name ? " (estimate)" : "";
   const you = position ? ` · you ±${position.sigma_m ?? "?"} m (${position.source ?? "track"})` : "";
-  $("mm-place").textContent = name || you ? `${name}${tag}${you}` : "";
+  const facing = headingText(heading);
+  $("mm-place").textContent = [name ? `${name}${tag}` : "", you.replace(/^ · /, ""), facing].filter(Boolean).join(" · ");
 }
 
 // 3D map is optional: no WebGL or a load failure leaves the 2D minimap in place.
