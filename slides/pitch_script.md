@@ -41,6 +41,8 @@ For people with vision loss, this means walking into a home, an office or a clin
 
 Blindsight lets blind and low-vision people tour a property independently, guided by voice, using CoStar 3D data.
 
+This is just the first step to a more visible future.
+
 > Track judges: swap in one line before the closing sentence.
 > Healthcare (main track): "Vision loss is a public health challenge for more than 7 million Americans. Blindsight turns the buildings they need, clinics and hospitals included, into places they can walk into alone."
 > Amazon: "It reasons and acts for a real user every day: where am I, what is around me, take me to the door, all by voice and vision."

@@ -24,10 +24,13 @@ None yet. The pitch uses no numeric claims. Add real measurements here before qu
 
 ## Sourced statistics (public sources, checked 2026-11-15)
 
-Quoted on slides 3 and 5 and in the pitch. External figures, not project measurements.
+Quoted on slides 3, 5, 12 and 13 and in the pitch; slide 14 lists them with links. External figures, not project measurements. Each was checked against the publisher's own page.
 
-- 43 million people blind worldwide, 295 million with moderate to severe vision impairment (2020), 61 million blind projected by 2050: IAPB Vision Atlas, Magnitude of Vision Loss evidence series, https://www.iapb.org/wp-content/uploads/2021/02/Vision-Atlas_Evidence-Series_Magnitude-of-VIsion-Loss_24022021.pdf
-- More than 7 million Americans with best-corrected visual acuity loss (vision loss glasses or contacts cannot fix): CDC Vision and Eye Health Surveillance System, https://www.cdc.gov/vision-health-data/prevalence-estimates/vision-loss-prevalence.html
-- 54.6% (54.59%) of 2024 US housing discrimination complaints were based on disability, the largest share: National Fair Housing Alliance, 2025 Fair Housing Trends Report, https://nationalfairhousing.org/reports/2025-fair-housing-trends-report/
-- 95.9% of the top one million home pages had detectable WCAG 2 failures (February 2026 scan): WebAIM Million 2026, https://webaim.org/projects/million/
-- More than 14 million spaces digitized by Matterport when CoStar completed the acquisition (February 28, 2025): CoStar Group press release, https://www.businesswire.com/news/home/20250228873241/en
+1. IAPB Vision Atlas, Magnitude of Global Vision Loss evidence series (2020 estimates): "43 million people are blind (crude prevalence: 0.5%)" and "295 million people have moderate to severe vision impairment (crude prevalence: 3.7%)". https://www.iapb.org/wp-content/uploads/2021/02/Vision-Atlas_Evidence-Series_Magnitude-of-VIsion-Loss_24022021.pdf
+2. GBD 2019 Blindness and Vision Impairment Collaborators, "Trends in prevalence of blindness and distance and near vision impairment over 30 years: an analysis for the Global Burden of Disease Study", The Lancet Global Health, 2021: 61.0 million (52.9 to 69.3) people projected to be blind by 2050. https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7820390/
+3. CDC, VEHSS Modeled Estimates: Vision Loss and Blindness (2024 estimates): "7.15 million people had best corrected visual acuity loss (prevalence: 2.10%)", meaning they could not improve their vision with eyeglasses or contact lenses alone. https://www.cdc.gov/vision-health-data/prevalence-estimates/vision-loss-prevalence.html
+4. National Fair Housing Alliance, 2025 Fair Housing Trends Report (published Nov 5, 2025): 17,645 of 32,321 housing discrimination complaints in 2024, 54.59%, were based on disability, the largest share. https://nationalfairhousing.org/wp-content/uploads/2025/11/2025-NFHA-Fair-Housing-Trends-Report.pdf
+5. WebAIM, The WebAIM Million, 2026 report (home pages analysed February 2026): 95.9% of the top one million home pages had detected WCAG 2 failures, up from 94.8% in 2025. https://webaim.org/projects/million/
+6. CoStar Group press release, "CoStar Group Completes Acquisition of Matterport", Feb 28, 2025 (SEC Form 8-K, Exhibit 99.1): "over 14 million spaces and 50 billion square feet digitized across 177 countries". https://www.sec.gov/Archives/edgar/data/1057352/000119312525042465/d899523dex991.htm
+7. Project data: Matterport Model API, model P3S6VUTP3qB (66 scan points, two floors; NOTES-part3.md), and the server startup log (1,584 reference views).
+8. HackPrinceton F26 Main Track and F26 Special Tracks documents, and MLH's prize email to participants (Nov 12, 2026): track descriptions and criteria on slide 12.

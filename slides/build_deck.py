@@ -34,6 +34,41 @@ ONE = (
     "Blindsight lets blind and low-vision people tour a property independently, "
     "guided by voice, using CoStar 3D data."
 )
+TAGLINE = "This is just the first step to a more visible future."
+
+# Every number on a slide cites one of these; slide 14 lists them with links. Figures were
+# checked against these pages on 2026-11-15 (see NOTES-part2.md).
+SOURCES = [
+    ("IAPB Vision Atlas, Magnitude of Global Vision Loss (2020 estimates)",
+     "43M blind; 295M moderate to severe vision impairment",
+     "https://www.iapb.org/wp-content/uploads/2021/02/Vision-Atlas_Evidence-Series_Magnitude-of-VIsion-Loss_24022021.pdf"),
+    ("GBD 2019 Blindness and Vision Impairment Collaborators, The Lancet Global Health, 2021",
+     "61.0 million people projected to be blind by 2050",
+     "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7820390/"),
+    ("CDC, VEHSS Modeled Estimates: Vision Loss and Blindness (2024 estimates)",
+     "7.15M in the US with vision loss glasses or contacts cannot correct",
+     "https://www.cdc.gov/vision-health-data/prevalence-estimates/vision-loss-prevalence.html"),
+    ("National Fair Housing Alliance, 2025 Fair Housing Trends Report",
+     "17,645 of 32,321 complaints in 2024 (54.59%) based on disability",
+     "https://nationalfairhousing.org/wp-content/uploads/2025/11/2025-NFHA-Fair-Housing-Trends-Report.pdf"),
+    ("WebAIM, The WebAIM Million: 2026 report (pages analysed February 2026)",
+     "95.9% of the top one million home pages had detected WCAG 2 failures",
+     "https://webaim.org/projects/million/"),
+    ("CoStar Group, \u201cCoStar Group Completes Acquisition of Matterport\u201d, Feb 28, 2025 (SEC Form 8-K)",
+     "Over 14 million spaces digitized across 177 countries",
+     "https://www.sec.gov/Archives/edgar/data/1057352/000119312525042465/d899523dex991.htm"),
+    ("Matterport Model API, model P3S6VUTP3qB (Princeton, Rabinowitz Hall), and our server log",
+     "66 scan points, two floors; 1,584 views indexed at startup",
+     None),
+    ("HackPrinceton F26 Main Track and F26 Special Tracks documents; MLH prize email, Nov 12, 2026",
+     "Track descriptions and judging criteria on slide 12",
+     None),
+]
+
+
+def cite(*numbers):
+    return "[" + ", ".join(str(n) for n in numbers) + "]"
+
 
 # Night navy dominates (title, demo, close); white content slides; amber is the voice.
 INK = RGBColor(0x0E, 0x17, 0x26)
@@ -300,8 +335,8 @@ def s_insight(prs, assets):
              anchor=MSO_ANCHOR.MIDDLE, name=f"{small} label")
     text(s, MARGIN, 6.3, 6.0, 0.35, "Built for sighted buyers. Nobody had turned it into guidance.",
          size=16, bold=True, color=MUTED, name="Takeaway")
-    source(s, "Matterport count: CoStar press release on closing the acquisition, Feb 28, 2025.",
-           w=6.0)
+    source(s, "Sources: 14M+ " + cite(6) + " CoStar, Feb 28, 2025. 66 and 1,584 " + cite(7)
+           + " Matterport API and our server log.", w=6.0)
     box = (6.75, 1.95, 6.0, 4.95)
     shot = assets.get("model") or assets.get("topdown")
     if shot:
@@ -561,14 +596,14 @@ def s_close(prs, assets):
     title(s, "Why Blindsight wins", dark=True)
     rows = [
         ("users", "Independence for millions", "More than 7 million Americans with vision loss "
-         "could walk into a home, an office or a clinic on their own."),
+         "[3] could walk into a home, an office or a clinic on their own."),
         ("layers", "Built on data that already exists", "CoStar's 3D scans are the map: no new "
          "mapping, and competitors cannot copy it without the data."),
         ("trend", "A path to scale", "A new audience for Homes.com, Apartments.com and LoopNet, "
          "and every scanned hospital, campus and office."),
     ]
     for k, (ico, head, body) in enumerate(rows):
-        y = 1.75 + k * 1.15
+        y = 1.6 + k * 1.08
         icon(s, ico, MARGIN + 0.42, y + 0.42, 0.78)
         text(s, MARGIN + 1.15, y + 0.02, 10.8, 0.45, head, size=21, bold=True, color=PAPER,
              name=f"{head} head")
@@ -576,12 +611,14 @@ def s_close(prs, assets):
              name=f"{head} body")
     rings(s, 11.55, 5.95, (1.0, 1.55, 2.1), width=1.25)
     icon(s, "volume", 11.55, 5.95, 0.62)
-    text(s, MARGIN, 5.35, 9.6, 1.3, ONE, size=24, bold=True, font=HEAD, color=AMBER, line=1.1,
+    text(s, MARGIN, 4.95, 9.6, 1.1, ONE, size=24, bold=True, font=HEAD, color=AMBER, line=1.1,
          name="One sentence")
+    text(s, MARGIN, 6.2, 9.6, 0.5, [[(TAGLINE, {"italic": True})]], size=20, color=PAPER,
+         name="Tagline")
     notes(s, "2:35 to 3:00.\n\nFor people with vision loss, this means walking into a home, an "
           "office or a clinic on their own. For CoStar, it is a new audience on Homes.com, "
           "Apartments.com and LoopNet, and a feature competitors cannot copy without this "
-          "data.\n\n" + ONE)
+          "data.\n\n" + ONE + "\n\n" + TAGLINE)
     return s
 
 
@@ -591,34 +628,33 @@ def s_why(prs, assets):
           sub="A large and growing group, already let down by buildings, housing and the web.")
     stats = [
         ("43M", "people are blind worldwide; 295M more have moderate to severe vision loss",
-         "IAPB Vision Atlas, 2020"),
+         "IAPB Vision Atlas, 2020 estimates " + cite(1)),
         ("7M+", "Americans have vision loss that glasses or contacts cannot fix",
-         "CDC, Vision and Eye Health Surveillance System"),
+         "CDC VEHSS, 2024 estimates " + cite(3)),
         ("54.6%", "of US housing discrimination complaints in 2024 were about disability, "
-         "the largest share", "National Fair Housing Alliance, 2025 report"),
+         "the largest share", "National Fair Housing Alliance, 2025 report " + cite(4)),
         ("95.9%", "of the top million home pages fail automated accessibility checks",
-         "WebAIM Million, 2026"),
+         "WebAIM Million, 2026 " + cite(5)),
     ]
     w, gap, top = 2.85, 0.233, 2.05
-    for k, (big, words, cite) in enumerate(stats):
+    for k, (big, words, ref) in enumerate(stats):
         x = MARGIN + k * (w + gap)
         rect(s, x, top, w, 3.45, MIST, name=f"{big} card")
         text(s, x + 0.3, top + 0.3, w - 0.6, 0.95, big, size=46, bold=True, font=HEAD,
              color=AMBER, name=f"{big} number")
         text(s, x + 0.3, top + 1.3, w - 0.6, 1.4, words, size=15, color=TEXT, name=f"{big} words")
-        text(s, x + 0.3, top + 2.85, w - 0.6, 0.45, cite, size=10, color=MUTED,
+        text(s, x + 0.3, top + 2.85, w - 0.6, 0.45, ref, size=10, color=MUTED,
              anchor=MSO_ANCHOR.BOTTOM, name=f"{big} source")
     icon(s, "trend", MARGIN + 0.33, 6.13, 0.62)
     text(s, MARGIN + 0.85, 5.85, 11.2, 0.6,
          [[("And it is growing: ", {"bold": True, "color": TEXT}),
-           ("61 million people are expected to be blind by 2050 (IAPB).", {})]],
+           ("61 million people are projected to be blind by 2050 " + cite(2) + ".", {})]],
          size=17, color=MUTED, anchor=MSO_ANCHOR.MIDDLE, name="Growth")
     notes(s, "Part of 0:00 to 0:25, about ten seconds.\n\n43 million people are blind worldwide, and "
           "more than 7 million Americans have vision loss that glasses cannot fix. Disability is "
           "already the most common basis of housing discrimination complaints in the US, and "
-          "almost every website fails basic accessibility checks.\n\nSources (also in "
-          "NOTES-part2.md): IAPB Vision Atlas 2020; CDC VEHSS; NFHA Fair Housing Trends Report 2025 "
-          "(54.59% of 2024 complaints); WebAIM Million 2026.")
+          "almost every website fails basic accessibility checks.\n\nSources: slide 14, "
+          "numbers 1 to 5.")
     return s
 
 
@@ -747,8 +783,8 @@ def s_future(prs, assets):
 TRACKS = [
     {"name": "Healthcare", "label": "Main track · Best Healthcare Hack", "icon": "hospital",
      "want": "Improve healthcare delivery, promote wellness or tackle a public health challenge",
-     "we": "Vision loss affects 7M+ Americans. Independent, safer mobility, and finding your way "
-           "in hospitals and clinics"},
+     "we": "Vision loss affects 7M+ Americans [3]. Independent, safer mobility, and finding your "
+           "way in hospitals and clinics"},
     {"name": "CoStar", "label": "Inside and Out: AI for the Built World", "icon": "layers",
      "want": "Combine CoStar, Matterport and Vexcel data; agentic; useful; polished",
      "we": "66 Matterport scans are the map (Vexcel approach is roadmap). The agent plans a route "
@@ -807,6 +843,8 @@ def s_tracks(prs, assets):
              anchor=MSO_ANCHOR.MIDDLE, name=f"{t['name']} want")
         text(s, cols[2][0], y + 0.06, cols[2][1], rh - 0.1, t["we"], size=13, color=TEXT,
              anchor=MSO_ANCHOR.MIDDLE, name=f"{t['name']} answer")
+    source(s, "Track criteria " + cite(8) + ": HackPrinceton F26 Main Track and F26 Special Tracks "
+           "documents; MLH prize email, Nov 12, 2026.", y=7.0)
     notes(s, "For track judges; skip in the timed pitch if short on time.\n\nHealthcare (main "
           "track): a public health challenge, independence and safe mobility, hospital "
           "wayfinding. CoStar: scored 30% data (combine at least two layers), 30% agentic depth, "
@@ -818,6 +856,30 @@ def s_tracks(prs, assets):
     return s
 
 
+def s_sources(prs, assets):
+    s = new_slide(prs)
+    title(s, "Sources", sub="Every number in this deck, where it comes from. Checked on November 15, "
+          "2026.")
+    top, rh = 1.95, 0.62
+    for k, (who, what, url) in enumerate(SOURCES):
+        y = top + k * rh
+        text(s, MARGIN, y, 0.5, rh, f"{k + 1}", size=16, bold=True, font=HEAD, color=AMBER,
+             name=f"Source {k + 1} number")
+        box = text(s, MARGIN + 0.55, y, 11.55, rh,
+                   [[(who, {"bold": True, "color": TEXT}), ("  " + what, {})]],
+                   size=12, color=MUTED, space_after=1, name=f"Source {k + 1}")
+        if url:
+            p = box.text_frame.add_paragraph()
+            r = p.add_run()
+            r.text = url
+            r.font.name, r.font.size = BODY, Pt(10)
+            r.font.color.rgb = RGBColor(0x1F, 0x5F, 0xAE)
+            r.hyperlink.address = url
+    notes(s, "Reference slide; do not present. Point to it if a judge asks where a number comes "
+          "from. NOTES-part2.md has the exact quotes and dates.")
+    return s
+
+
 # ---------------------------------------------------------------- build
 ASSETS = {
     "model": Path("data/rabinowitz_combined.png"),
@@ -826,7 +888,7 @@ ASSETS = {
     "viewer": Path("data/reports/viewer.png"),
 }
 SLIDES = (s_title, s_problem, s_why, s_gap, s_insight, s_demo, s_how, s_built, s_usecases,
-          s_roadmap, s_future, s_tracks, s_close)
+          s_roadmap, s_future, s_tracks, s_close, s_sources)
 
 
 def build(out: Path, assets: dict) -> Presentation:
