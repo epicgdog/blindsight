@@ -555,6 +555,8 @@ class FrameEval:
     total_ms: float = 0.0
     sims: np.ndarray | None = field(default=None, repr=False)  # not serialized
     verifs: dict = field(default_factory=dict, repr=False)  # ref idx -> Verification, not serialized
+    n_live: int = field(default=0, repr=False)  # live-frame keypoints (debug), not serialized
+    live_size: tuple = field(default=(0, 0), repr=False)  # (w, h) of the prepared frame, not serialized
 
     def best_demo(self, t_lo: float = -2.0) -> Cand | None:
         c = [c for c in self.cands if c.demo and (c.sim >= t_lo or c.via != "retrieval")]
@@ -1108,6 +1110,7 @@ class Localizer:
             self._cand_of(top_any_ids[0], sims) if top_any_ids else None,
             embed_ms=(t2 - t1) * 1000, extract_ms=(t3 - t2) * 1000 + (t1 - t0) * 1000,
             verify_ms=(t4 - t3) * 1000, total_ms=(t4 - t0) * 1000, sims=sims, verifs=verifs,
+            n_live=len(feats), live_size=(w, h),
         )
 
     # -- contract ----------------------------------------------------------------
@@ -1218,8 +1221,66 @@ class Localizer:
                 "best_inliers": int(best.inliers) if best else 0,
                 "best_grid_cells": int(best.grid) if best else 0,
                 "frame_shape": list(frame_rgb.shape),
+                "steps": self._debug_steps(fe, best, matched, screened, verdicts, distinctive, imu_rejected,
+                                           jump_rejected, embed_now, heading, pitch_deg, moving, fix, track,
+                                           match_view, frame_rgb.shape),
             }
             return loc
+
+    def _debug_steps(self, fe, best, matched, screened, verdicts, distinctive, imu_rejected, jump_rejected,
+                     embed_now, heading, pitch_deg, moving, fix, track, match_view, shape) -> dict:
+        """Every stage of this frame, for the debug server (server/debug_server.py)."""
+        try:
+            lw, lh = fe.live_size
+            rw, rh = self.ref_size
+            # Matched points of the best candidate (else the strongest one checked), normalised 0..1.
+            show = best or max((c for c in fe.cands if c.demo), key=lambda c: (c.inliers, c.grid), default=None)
+            pts = None
+            if show is not None and show.idx in fe.verifs and lw and lh:
+                v = fe.verifs[show.idx]
+
+                def norm(a, w, h, n=200):
+                    if a is None or not len(a):
+                        return []
+                    a = np.asarray(a, float)[:n]
+                    return np.round(np.column_stack([a[:, 0] / w, a[:, 1] / h]), 4).tolist()
+
+                r = self._refs[show.idx]
+                pts = {"ref": int(show.idx), "ref_name": r.view.name, "place": r.place,
+                       "live_inliers": norm(v.live_pts, lw, lh), "ref_inliers": norm(v.ref_pts, rw, rh),
+                       "live_matches": norm(v.match_live_pts, lw, lh), "ref_matches": norm(v.match_ref_pts, rw, rh)}
+            pos = self.position.last if (self.position is not None and matched and best is not None) else None
+            return {
+                "1_input": {"frame_wh": [int(shape[1]), int(shape[0])], "prepared_wh": [lw, lh],
+                            "hfov_deg": self.s.HFOV_DEG, "heading_deg": heading, "pitch_deg": pitch_deg,
+                            "moving": moving},
+                "2_retrieval": {"embedded_now": embed_now, "ms": round(fe.embed_ms, 1),
+                                "picks": (match_view or {}).get("picks")},
+                "3_features": {"live_keypoints": fe.n_live, "ms": round(fe.extract_ms, 1)},
+                "4_verify": {"ms": round(fe.verify_ms, 1), "rot_tol_deg": 3.0, "n_min": self.s.N_MIN,
+                             "grid_min": self.s.GRID_CELLS_MIN,
+                             "cands": [{"name": c.name, "place": c.place, "via": c.via, "demo": c.demo,
+                                        "sim": round(c.sim, 3), "matches": c.n_matches, "homography": c.h_inliers,
+                                        "rotation_inliers": c.inliers, "grid": c.grid,
+                                        "yaw": c.yaw, "pitch": c.pitch, "ms": round(c.ms, 1),
+                                        "verdict": verdicts.get(c.idx, "kept")}
+                                       for c in sorted(fe.cands, key=lambda c: -c.inliers)]},
+                "5_decide": {"matched": matched, "screened": screened,
+                             "best": None if best is None else {"name": best.name, "place": best.place,
+                                                                "inliers": best.inliers, "grid": best.grid},
+                             "competitor_inliers": fe.best_comp_inliers(), "imu_rejected": imu_rejected,
+                             "jump_rejected": jump_rejected, "distinctive": distinctive},
+                "6_pnp": pos if pos else {"result": "not run: no verified match" if not matched
+                                          else ("position solver off" if self.position is None else "not run")},
+                "7_tracker": {"accepted": track.accepted, "rejected": track.rejected, "reinit": track.reinit,
+                              "d2": None if track.d2 is None else round(track.d2, 2),
+                              "xyz": None if self.tracker.xyz is None else [round(float(x), 3) for x in self.tracker.xyz],
+                              "sigma_m": None if self.tracker.sigma_m is None else round(self.tracker.sigma_m, 3),
+                              "place": self.tracker.place, "used_pnp": fix is not None},
+                "points": pts,
+            }
+        except Exception as ex:  # debug output must never break localization
+            return {"error": f"{type(ex).__name__}: {ex}"}
 
     def _hold_place(self, matched: bool, best, hold: bool = False):
         """Multi-place hysteresis: a different place must win on SWITCH_FRAMES frames in a row.
@@ -1271,6 +1332,7 @@ class Localizer:
         """Metric camera position for the verified best match, or None."""
         if self.position is None or best is None:
             return None
+        self.position.last = {"result": "no verification stored for the best candidate"}
         v = fe.verifs.get(best.idx)
         if v is None:
             return None

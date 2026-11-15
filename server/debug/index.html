@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blindsight debug</title>
+  <style>
+    :root { --bg:#0b0b0f; --fg:#e8e9ee; --dim:#9aa0b0; --card:#16161d; --ok:#17c964; --warn:#f5a524; --bad:#f31260; --line:#2a2c38; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    header { display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:2; }
+    header h1 { font:700 18px system-ui, sans-serif; margin:0 12px 0 0; }
+    .pill { background:var(--card); padding:4px 10px; border-radius:12px; }
+    .LOCKED { background:var(--ok); color:#000; } .UNCERTAIN { background:var(--warn); color:#000; } .LOST { background:var(--bad); }
+    button { font:inherit; padding:4px 12px; border-radius:6px; border:0; background:#3b82f6; color:#fff; cursor:pointer; }
+    main { display:grid; grid-template-columns:minmax(0, 1.1fr) minmax(0, 1fr); gap:12px; padding:12px 16px 40px; }
+    .card { background:var(--card); border-radius:10px; padding:10px; min-width:0; }
+    h2 { font:600 14px system-ui, sans-serif; margin:0 0 8px; color:var(--dim); text-transform:uppercase; letter-spacing:.04em; }
+    #pair { width:100%; display:block; background:#000; border-radius:6px; }
+    #pair-caption { color:var(--dim); margin-top:6px; }
+    #maps { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    #map2d { width:100%; height:380px; background:#1d2130; border-radius:6px; }
+    #map3d { width:100%; height:380px; background:#1d2130; border-radius:6px; overflow:hidden; }
+    #map3d canvas { display:block; }
+    #where { margin-top:6px; color:var(--dim); }
+    #steps { grid-column:1 / -1; }
+    details { border-top:1px solid var(--line); padding:6px 0; }
+    summary { cursor:pointer; font-weight:700; }
+    summary .s { font-weight:400; color:var(--dim); margin-left:8px; }
+    table { border-collapse:collapse; margin-top:6px; width:100%; }
+    td, th { border-bottom:1px solid var(--line); padding:3px 8px; text-align:left; vertical-align:top; white-space:nowrap; }
+    th { color:var(--dim); font-weight:400; }
+    .wrap { overflow-x:auto; }
+    tr.kept td:last-child { color:var(--ok); } tr.out td:last-child { color:var(--bad); }
+    pre { white-space:pre-wrap; word-break:break-word; margin:6px 0 0; color:var(--dim); }
+    .mm-walls { fill:none; stroke:#aab4cc; stroke-width:2; vector-effect:non-scaling-stroke; }
+    .mm-dot { fill:#0009; stroke:#fff8; stroke-width:2; vector-effect:non-scaling-stroke; }
+    .mm-active { fill:var(--ok); } .mm-estimate { fill:#f5a52455; stroke:var(--warn); } .mm-candidate { fill:var(--warn); }
+    .mm-you { fill:#fff; stroke:var(--ok); stroke-width:4; }
+    .mm-raw { fill:var(--bad); stroke:#fff; stroke-width:2; vector-effect:non-scaling-stroke; }
+    .mm-pano { fill:none; stroke:#22d3ee; stroke-width:3; vector-effect:non-scaling-stroke; }
+    .mm-route { fill:none; stroke:#22d3ee; stroke-width:4; vector-effect:non-scaling-stroke; }
+    .mm-straight { fill:none; stroke:#fff8; stroke-width:2; stroke-dasharray:6 6; vector-effect:non-scaling-stroke; }
+    .mm-arrow { stroke:#ff4fd8; stroke-width:4; vector-effect:non-scaling-stroke; } .mm-arrow-head { fill:#ff4fd8; }
+    .legend span { margin-right:12px; } .legend i { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+    @media (max-width: 1000px) { main, #maps { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Blindsight debug</h1>
+    <span id="conn" class="pill">connecting…</span>
+    <span id="state" class="pill">–</span>
+    <span id="place" class="pill">–</span>
+    <span id="reason" class="pill">–</span>
+    <span id="timing" class="pill">–</span>
+    <button id="pause" type="button">Pause</button>
+    <button id="copy" type="button">Copy frame JSON</button>
+  </header>
+  <main>
+    <section class="card">
+      <h2>Frame ↔ matched reference</h2>
+      <canvas id="pair" width="960" height="640"></canvas>
+      <div id="pair-caption"></div>
+    </section>
+    <section class="card">
+      <h2>Where (mesh frame)</h2>
+      <div id="maps"><svg id="map2d" viewBox="0 0 400 400"></svg><div id="map3d"></div></div>
+      <div class="legend">
+        <span><i style="background:#fff;border:2px solid #17c964"></i>tracked</span>
+        <span><i style="background:#f31260"></i>raw PnP fix</span>
+        <span><i style="border:2px solid #22d3ee"></i>matched pano</span>
+        <span><i style="background:#ff4fd8"></i>heading</span>
+        <span><i style="background:#22d3ee"></i>route</span>
+      </div>
+      <div id="where"></div>
+    </section>
+    <section class="card" id="steps"><h2>Stages</h2><div id="step-list"></div></section>
+  </main>
+  <script type="module" src="/debug/debug.js"></script>
+</body>
+</html>

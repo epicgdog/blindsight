@@ -792,9 +792,12 @@ def create_app(
                     await websocket.close(1011, "Frame processing failed; reconnect to retry")
                     return
                 runtime.publish(item)
+                # The per-step debug block (matched points, every candidate) is for viewers only.
+                dbg = item.result.get("localization_debug") or {}
+                phone_result = {**item.result, "localization_debug": {k: v for k, v in dbg.items() if k != "steps"}}
                 async with send_lock:
                     await asyncio.wait_for(
-                        websocket.send_json(item.result), settings.send_timeout_s
+                        websocket.send_json(phone_result), settings.send_timeout_s
                     )
 
         async def push_voice():

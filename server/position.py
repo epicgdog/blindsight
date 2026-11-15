@@ -252,6 +252,7 @@ class PositionSolver:
         self.depth = depth
         self.frames = frames
         self._cache: dict = {}
+        self.last: dict = {}
         self._max_cache = max_cache
         self._lock = threading.Lock()
         self._queue: queue.Queue | None = None
@@ -339,19 +340,40 @@ class PositionSolver:
 
     def solve(self, v, key, place: str, kpts: np.ndarray, yaw: float, pitch: float, roll: float,
               K_ref: np.ndarray, K_live: np.ndarray) -> PositionFix | None:
+        # self.last: what this solve saw and where it stopped, for the debug server.
+        last = self.last = {"place": place, "ref": key[1] if isinstance(key, tuple) else str(key),
+                            "pairs": 0, "mesh_hits": 0, "pending": 0, "result": None}
         if v.match_ref_idx is None or v.match_live_pts is None or len(v.match_ref_idx) < PNP_MIN_INLIERS:
+            last["result"] = f"too few 2D-2D matches (< {PNP_MIN_INLIERS})"
             return None
         idx = np.asarray(v.match_ref_idx, int)
+        last["pairs"] = int(len(idx))
         rp = self.ref_points(key, place, kpts, yaw, pitch, roll, K_ref, idx)
         if rp is None:
+            last["result"] = "no mesh frame for this pano"
             return None
         pts, ok = rp
         sel = ok[idx]
+        last["mesh_hits"] = int(sel.sum())
+        with self._lock:
+            e = self._cache.get(key)
+            last["pending"] = int((e["state"][idx] == self.PENDING).sum()) if e is not None else 0
         if sel.sum() < PNP_MIN_INLIERS:
+            last["result"] = f"too few rays hit the mesh yet (< {PNP_MIN_INLIERS}; {last['pending']} still casting)"
             return None
         guess = cam_to_world(yaw, pitch, roll) @ v.R.T if v.R is not None else None
         fix = solve_pnp(pts[idx[sel]], v.match_live_pts[sel], K_live, guess)
-        if fix is None or fix.inliers < PNP_MIN_INLIERS or fix.offset_m > PNP_MAX_OFFSET_M:
+        if fix is None:
+            last["result"] = "PnP RANSAC failed"
+            return None
+        last.update(pnp_inliers=fix.inliers, reproj_px=round(fix.reproj_px, 2), offset_m=round(fix.offset_m, 2),
+                    world=[round(float(x), 3) for x in self.frames[place].to_depth(fix.local)])
+        if fix.inliers < PNP_MIN_INLIERS:
+            last["result"] = f"too few PnP inliers (< {PNP_MIN_INLIERS})"
+            return None
+        if fix.offset_m > PNP_MAX_OFFSET_M:
+            last["result"] = f"pose {fix.offset_m:.1f} m from the pano (> {PNP_MAX_OFFSET_M})"
             return None
         fix.world = self.frames[place].to_depth(fix.local)
+        last["result"] = "ok"
         return fix
