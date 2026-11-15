@@ -579,7 +579,7 @@ function LegacyApp() {
       <StatusBar barStyle="dark-content" />
       {screen === "nav" ? (
         <View style={[StyleSheet.absoluteFill, s.camBack]}>
-          <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" pictureSize={PICTURE_SIZE} />
+          <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" pictureSize={PICTURE_SIZE} animateShutter={false} />
           <ArOverlay width={winW} height={winH} getPose={getArPose} cam={arCam} />
         </View>
       ) : venueData ? (
@@ -788,7 +788,7 @@ function LegacyApp() {
         </View>
         <View style={s.sheetTop}>
           <View style={s.preview}>
-            {screen !== "nav" ? <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" pictureSize={PICTURE_SIZE} /> : null}
+            {screen !== "nav" ? <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" pictureSize={PICTURE_SIZE} animateShutter={false} /> : null}
             {(result?.detections ?? []).map((d, i) => (
               <View key={i} style={[s.det, boxStyle(d.bbox)]} pointerEvents="none">
                 <Text style={s.detText}>{d.cls} {Math.round(d.conf * 100)}%</Text>
