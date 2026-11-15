@@ -126,7 +126,10 @@ def make_localizer(settings: Settings, detector=None):
             settings.mask_refs
             and detector is not None
             and not isinstance(detector, StubDetector)
-            and "ref_detector" in parameters
+            and (
+                "ref_detector" in parameters
+                or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values())
+            )
         ):
             # Mask people and furniture out of the pano reference views with the live detector.
             kwargs["ref_detector"] = detector.detect

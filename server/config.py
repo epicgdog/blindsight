@@ -32,8 +32,8 @@ DEFAULT_PANO_ID = "1k478kza39tbfu1uhbttg5ybb"
 DEFAULT_PANO_LABEL = "Rabinowitz Hall"
 LOCALIZER = os.getenv("LOCALIZER", "stub")
 CANDIDATE_PLACES = os.getenv("CANDIDATE_PLACES", "all")  # "all", a number N (nearest N), or "1"
-# Opt in: mask people and furniture out of the pano reference views.
-MASK_REFS = env_bool("MASK_REFS", False)
+# On by default (MASK_REFS=0 turns it off): mask people and furniture out of the pano reference views.
+MASK_REFS = env_bool("MASK_REFS", True)
 
 
 @dataclass(frozen=True)

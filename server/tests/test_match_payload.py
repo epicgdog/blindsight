@@ -83,15 +83,15 @@ def test_pano_metadata_lists_place_names_for_the_viewer(tmp_path):
 # ---- reference-view masking wiring ----------------------------------------------------
 
 
-def test_masking_is_off_by_default_and_can_be_enabled(monkeypatch):
+def test_masking_is_on_by_default_and_can_be_disabled(monkeypatch):
     import importlib
 
     import server.config as config
 
     monkeypatch.delenv("MASK_REFS", raising=False)
-    assert importlib.reload(config).Settings().mask_refs is False
-    monkeypatch.setenv("MASK_REFS", "1")
     assert importlib.reload(config).Settings().mask_refs is True
+    monkeypatch.setenv("MASK_REFS", "0")
+    assert importlib.reload(config).Settings().mask_refs is False
     monkeypatch.delenv("MASK_REFS")
     importlib.reload(config)
 
@@ -129,6 +129,30 @@ def test_real_detector_is_handed_to_the_localizer_for_masking(settings, monkeypa
     make_localizer(replace(settings, localizer="real", mask_refs=True), detector)
     assert seen["ref_detector"] == detector.detect
     assert "yolo" in seen["ref_detector_id"]
+
+
+def test_detector_reaches_a_localizer_that_takes_only_kwargs(settings, monkeypatch):
+    import importlib
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from server.server import make_localizer
+
+    seen = {}
+
+    class KwargsLocalizer:  # like property_localize.Localizer(data_dir=None, pano_id=None, **kwargs)
+        def __init__(self, data_dir=None, pano_id=None, **kwargs):
+            seen.update(kwargs)
+
+    monkeypatch.setattr(importlib, "import_module", lambda name: SimpleNamespace(Localizer=KwargsLocalizer))
+
+    class RealDetector:
+        def detect(self, rgb):
+            return []
+
+    detector = RealDetector()
+    make_localizer(replace(settings, localizer="real", mask_refs=True), detector)
+    assert seen["ref_detector"] == detector.detect
 
 
 def test_no_masking_with_stub_detector_or_when_disabled(settings, monkeypatch):
