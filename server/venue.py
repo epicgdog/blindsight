@@ -41,6 +41,8 @@ SCAN_FLOOR_LEVEL = {0: "1", 2: "2"}  # our scan floor index -> venue level
 LEVEL_Z_SPLIT_M = 3.4  # camera height above this (map z) is level 2, below is level 1
 SNAP_MAX_M = 8.0  # a position further than this from any walkable floor is left as is
 NODE_DETOUR_M = 12.0  # a route may start at a node this much further away to avoid crossing a hole
+GRID_PX = 2  # drawn routes are searched on the walkable mask at this pixel step
+BLOCKED_COST = 60.0  # cost of one grid cell that is not walkable (crossing a door line, never a hole)
 
 _UNITS = {"zero": 0, "oh": 0, "o": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
           "seven": 7, "eight": 8, "nine": 9}
@@ -120,6 +122,8 @@ class Venue:
     def __init__(self, data: dict, align: dict, marked_path: Path | None = None, walk_dir: Path | None = None):
         self.walk_dir = walk_dir  # walk_<level>.png masks (tools/venue_walkable.py); None: no snapping
         self._walk: dict[str, Any] = {}
+        self._grids: dict[str, Any] = {}
+        self._edge_paths: dict[tuple, list] = {}
         self.levels = {lv["id"]: lv for lv in data["levels"]}
         self.rooms = {r["id"]: r for r in data["rooms"]}
         self.align = align
@@ -306,6 +310,119 @@ class Venue:
             good += self.walkable(level, (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t))
         return total == 0 or good >= 0.85 * total
 
+    # -- drawn route geometry: follows the walkable floor -----------------------
+    def _grid(self, level: str):
+        """(cost grid at GRID_PX, eroded mask at full size) for a level, or None without a mask."""
+        if level not in self._grids:
+            mask = self.walk_mask(level)
+            if mask is None:
+                self._grids[level] = None
+            else:
+                import cv2
+                import numpy as np
+                m2 = mask[::GRID_PX, ::GRID_PX].astype(np.uint8)
+                dist = cv2.distanceTransform(m2, cv2.DIST_L2, 3)
+                # walkable cells are cheaper the further they are from a wall: routes run mid-corridor
+                cost = np.where(m2 > 0, 1.0 + 2.5 / (1.0 + dist), BLOCKED_COST)
+                inner = cv2.erode(mask.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+                self._grids[level] = (cost, inner)
+        return self._grids[level]
+
+    def floor_path(self, level: str, a, b, pad_px: int = 80) -> list[tuple[float, float]]:
+        """Pixel path a -> b over walkable floor (A* on the mask, preferring corridor centres,
+        searched in a box around a and b). Straight line when there is no mask."""
+        g = self._grid(level)
+        a, b = (float(a[0]), float(a[1])), (float(b[0]), float(b[1]))
+        if g is None or math.dist(a, b) < 2 * GRID_PX:
+            return [a, b]
+        cost = g[0]
+        h, w = cost.shape
+        cell = lambda p: (min(w - 1, max(0, int(round(p[0] / GRID_PX)))), min(h - 1, max(0, int(round(p[1] / GRID_PX)))))
+        sa, sb = cell(a), cell(b)
+        pad = pad_px // GRID_PX
+        x0, x1 = max(0, min(sa[0], sb[0]) - pad), min(w - 1, max(sa[0], sb[0]) + pad)
+        y0, y1 = max(0, min(sa[1], sb[1]) - pad), min(h - 1, max(sa[1], sb[1]) + pad)
+        win = cost[y0:y1 + 1, x0:x1 + 1].tolist()
+        W, H = x1 - x0 + 1, y1 - y0 + 1
+        start, goal = (sa[0] - x0, sa[1] - y0), (sb[0] - x0, sb[1] - y0)
+        steps = [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
+                 (1, 1, 1.4142), (1, -1, 1.4142), (-1, 1, 1.4142), (-1, -1, 1.4142)]
+        best = {start: 0.0}
+        prev: dict = {}
+        heap = [(math.dist(start, goal), 0.0, start)]
+        while heap:
+            _, d, cur = heapq.heappop(heap)
+            if cur == goal:
+                break
+            if d > best.get(cur, math.inf):
+                continue
+            cx, cy = cur
+            for dx, dy, L in steps:
+                nx, ny = cx + dx, cy + dy
+                if not (0 <= nx < W and 0 <= ny < H):
+                    continue
+                nd = d + L * win[ny][nx]
+                if nd < best.get((nx, ny), math.inf):
+                    best[(nx, ny)] = nd
+                    prev[(nx, ny)] = cur
+                    heapq.heappush(heap, (nd + math.dist((nx, ny), goal), nd, (nx, ny)))
+        if goal not in best:
+            return [a, b]
+        cells = [goal]
+        while cells[-1] != start:
+            cells.append(prev[cells[-1]])
+        cells.reverse()
+        pts = [((x + x0) * GRID_PX, (y + y0) * GRID_PX) for x, y in cells]
+        return [a, *pts[1:-1], b]
+
+    def _inner_clear(self, level: str, a, b, end_px: float = 4.0) -> bool:
+        """Every point of a -> b (ends excepted) is walkable with a margin from walls."""
+        g = self._grid(level)
+        if g is None:
+            return True
+        inner = g[1]
+        d = math.dist(a, b)
+        n = max(1, int(d // 1.5))
+        for i in range(n + 1):
+            t = i / n
+            if d * t < end_px or d * (1 - t) < end_px:
+                continue
+            u, v = int(round(a[0] + (b[0] - a[0]) * t)), int(round(a[1] + (b[1] - a[1]) * t))
+            if not (0 <= v < inner.shape[0] and 0 <= u < inner.shape[1] and inner[v, u]):
+                return False
+        return True
+
+    def straighten(self, level: str, pts: list) -> list:
+        """Fewest straight runs that stay on walkable floor: from each kept point, go as far along
+        the path as a straight line stays clear."""
+        if len(pts) < 3:
+            return list(pts)
+        out, i = [pts[0]], 0
+        while i < len(pts) - 1:
+            j = i + 1
+            while j + 1 < len(pts) and self._inner_clear(level, pts[i], pts[j + 1]):
+                j += 1
+            out.append(pts[j])
+            i = j
+        return out
+
+    def drawn_leg(self, level: str, waypoints: list, names: list) -> list:
+        """The drawn path through a leg's waypoints (start, graph nodes...): each hop over the
+        floor (node to node hops cached), then straightened."""
+        # graph nodes traced on a wall line are moved onto the floor first (no spike into the wall)
+        waypoints = [waypoints[0], *(self.snap(level, w, 2.5)[0] for w in waypoints[1:])]
+        pts: list = [waypoints[0]]
+        for k, (a, b) in enumerate(zip(waypoints, waypoints[1:])):
+            key = (level, names[k], names[k + 1]) if names[k] and names[k + 1] else None
+            if key is not None and key in self._edge_paths:
+                hop = self._edge_paths[key]
+            else:
+                hop = self.floor_path(level, a, b)
+                if key is not None:
+                    self._edge_paths[key] = hop
+            pts.extend(hop[1:])
+        return self.straighten(level, _dedupe(pts))
+
     def level_of(self, z: float | None = None, scan_floor: int | None = None) -> str | None:
         if z is not None and math.isfinite(z):
             return "2" if z > LEVEL_Z_SPLIT_M else "1"
@@ -445,30 +562,43 @@ class Venue:
             chain.append(p)
         chain.reverse()
         links.reverse()
-        # legs: one per level, start point first, door last
+        # legs: one per level, start point first, door last (names: graph node per point, None
+        # for the start and the door)
         legs: list[dict] = []
-        cur_level, pts = start.level, [tuple(start.px)]
+        cur_level, pts, names = start.level, [tuple(start.px)], [None]
         for lvl, name in chain:
             if lvl != cur_level:
-                legs.append({"level": cur_level, "px": pts})
-                cur_level, pts = lvl, []
+                legs.append({"level": cur_level, "px": pts, "names": names})
+                cur_level, pts, names = lvl, [], []
             pts.append(self.nodes[lvl][name])
+            names.append(name)
         join = self.nodes[room["level"]][room["join"]]
         door_hop = math.dist(join, room["door"]) > 0.5  # an atrium's "door" is its centre: no hop
         pts.append(tuple(room["door"]))
-        legs.append({"level": cur_level, "px": pts})
-        for leg in legs:
-            leg["px"] = _dedupe(leg["px"])
+        names.append(None)
+        legs.append({"level": cur_level, "px": pts, "names": names})
+        transfers = [{"from_level": a[0], "to_level": b[0], "kind": link["kind"], "name": link["name"]}
+                     for a, b, link in links]
+        # spoken steps from the traced corridor lines: clean turns at the corridor junctions
+        traced = [{"level": leg["level"], "px": _dedupe(leg["px"])} for leg in legs]
+        steps = self.steps({"to": self.room_info(to), "legs": traced, "transfers": transfers, "door_hop": door_hop},
+                           heading_deg)
+        for i, leg in enumerate(legs):
+            last = i == len(legs) - 1
+            body, body_names = (leg["px"][:-1], leg["names"][:-1]) if last and door_hop else (leg["px"], leg["names"])
+            # drawn: over walkable floor; the last hop into a room stays straight (doors sit in walls)
+            px = self.drawn_leg(leg["level"], body, body_names) if len(body) > 1 else list(body)
+            if last and door_hop:
+                px.append(tuple(room["door"]))
+            leg.pop("names")
+            leg["px"] = _dedupe(px)
             leg["m"] = [list(map(lambda v: round(v, 2), self.to_map(leg["level"], *p))) for p in leg["px"]]
             leg["length_m"] = round(sum(self.px_dist(leg["level"], a, b) for a, b in zip(leg["px"], leg["px"][1:])), 1)
             leg["px"] = [[round(u, 1), round(v, 1)] for u, v in leg["px"]]
         walk = sum(leg["length_m"] for leg in legs)
-        transfers = [{"from_level": a[0], "to_level": b[0], "kind": link["kind"], "name": link["name"]}
-                     for a, b, link in links]
-        out = {"ok": True, "to": self.room_info(to), "from_level": start.level, "legs": legs, "door_hop": door_hop,
-               "transfers": transfers, "total_m": round(walk + STAIRS_M * sum(t["kind"] == "stairs" for t in transfers), 1)}
-        out["steps"] = self.steps(out, heading_deg)
-        return out
+        return {"ok": True, "to": self.room_info(to), "from_level": start.level, "legs": legs, "door_hop": door_hop,
+                "transfers": transfers, "total_m": round(walk + STAIRS_M * sum(t["kind"] == "stairs" for t in transfers), 1),
+                "steps": steps}
 
     def steps(self, route: dict, heading_deg: float | None = None) -> list[str]:
         """Spoken step list: walk distances, turns, level changes, which side the door is on.

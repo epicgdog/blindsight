@@ -273,3 +273,34 @@ def test_mark_rejects_unknown_kinds(tmp_path):
 def test_mark_api_needs_a_known_position(settings):
     with TestClient(create_app(settings)) as client:
         assert client.post("/api/venue/mark", json={"kind": "water"}).status_code == 409
+
+
+def test_drawn_routes_stay_on_walkable_floor(venue):
+    # the drawn path follows the floor mask; what may remain off it is a doorway the plan draws as
+    # a line or a staircase opening, never a hole or a room crossed. Rooms with approximate doors
+    # (unscanned Simpson wing) are left out.
+    def off_floor_m(level, a, b):
+        n = max(2, int(math.dist(a, b) // 2))
+        ok = sum(venue.walkable(level, (a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n)) for i in range(n + 1))
+        return math.dist(a, b) / venue.scale(level) * (1 - ok / (n + 1))
+
+    for rid, room in venue.rooms.items():
+        if room.get("approximate"):
+            continue
+        r = venue.route(rid, CHECK_IN)
+        off = 0.0
+        for i, leg in enumerate(r["legs"]):
+            segs = list(zip(leg["px"], leg["px"][1:]))
+            if r["door_hop"] and i == len(r["legs"]) - 1:
+                segs = segs[:-1]  # the step through the door into the room
+            off += sum(off_floor_m(leg["level"], a, b) for a, b in segs)
+        assert off < 2.5, (rid, round(off, 1))  # 201: ~1.1 m is the Level 2 atrium staircase opening
+
+
+def test_route_from_the_atrium_east_goes_around_the_opening(venue):
+    # the X-marked strip on the east side of the atrium is not crossed on the way east
+    r = venue.route("restroom-1n", CHECK_IN)
+    for a, b in zip(r["legs"][0]["px"], r["legs"][0]["px"][1:]):
+        for t in (0.25, 0.5, 0.75):
+            u, v = a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
+            assert not (568 < u < 584 and 390 < v < 488), (a, b)
