@@ -1,3 +1,121 @@
+# Handoff: Gemini Live voice agent (2026-11-14, evening session)
+
+Where the voice agent work stopped. The older integration notes from the part owners follow
+below the line, unchanged.
+
+## Run it
+
+```sh
+# server (own terminal; startup ~2 min). LOCALIZATION_SCOPE=single is required, see Known issues.
+LOCALIZER=real LOCALIZATION_SCOPE=single uv run python -m server.server
+# or, while editing code: models built once and kept in RAM, server code hot-reloads in ~1 s
+LOCALIZER=real LOCALIZATION_SCOPE=single uv run python3 -m server.devserver
+# phone app (Expo Go). Reload the app after pulling: expo-speech was removed.
+cd app && EXPO_PACKAGER_HOSTNAME=<your-tailscale-ip> EXPO_PUBLIC_SERVER_URL=wss://<your-funnel-host>/ws/phone npx expo start
+```
+
+- Key: `GOOGLE_API_KEY` in `.env.local` (read by `server/agent.py:read_env_key`; never printed).
+  Verified working at the end of the session (it had run out of prepaid credit earlier: 402).
+- Everything Gemini runs on API version **v1beta** (Live, function calling and TTS fail on v1).
+- `AGENT=0` turns the agent off and brings back the old cue engine (server tests run that way).
+- Tailscale funnel is public: anyone with the URL can spend Gemini credit through
+  `/api/voice` and `/api/agent/talk`. Turn it off after the demo: `tailscale funnel --https=443 off`.
+
+## What it does now
+
+The phone has no on-device speech. One **Gemini Live** session per phone connection
+(`gemini-3.8-live`) is the only voice:
+
+1. **User talks** (hold-to-talk button): the app records m4a with expo-audio and POSTs it to
+   `/api/agent/talk`. The server decodes it to 16 kHz PCM with ffmpeg and sends it between manual
+   `activity_start` / `activity_end` markers (no voice activity detection).
+2. **Server events**: each frame, `AgentState.on_frame` produces events and the server sends them to
+   Live as `EVENT:` text. Events are the next guidance instruction, arrival, and a very close obstacle
+   (seen 2 frames in a row, once per 6 s per class). The agent decides how to say them. The old
+   `CueEngine` stays silent while the agent is on.
+3. **Tools** are answered by code, never the model: `get_location`, `get_surroundings`,
+   `start_navigation`, `stop_navigation`, `get_route_status`, `describe_view` (one gemini-2.5-flash
+   vision call on the latest frame).
+4. **Audio to the phone is streamed**: Live's 24 kHz PCM is cut into **50 ms WAV segments**
+   (`SEGMENT_BYTES = 2400` in `server/agent.py`). Each one is pushed the moment it exists over the
+   phone websocket as `{"type":"voice", turn, seq, first, last, interrupt, url}`. The phone fetches
+   `/api/agent/clip/<id>` and plays segments back to back (`app/src/voice.js`). The first segment of an
+   answer or an urgent warning interrupts; the rest queue. A clip that has not started after 6 s is
+   skipped.
+5. **Fixed app phrases** ("Blindsight ready", error lines) are Gemini TTS
+   (`gemini-2.5-flash-preview-tts`, `/api/voice?text=`, cached in `data/voice_cache/`).
+
+Supporting pieces:
+
+- **Place decision** (`server/place_window.py`): per-frame confidence is
+  `(i1/(i1+N_MIN)) * (i1/(i1+i2))` from the match ranking's inliers. Over the last 5 s, the most
+  confident frame above 0.70 decides the place. With no confident frame it holds the last place;
+  after 10 s the place is unknown.
+- **Route to the entrance** (`server/entrance_nav.py`): the entrance is scan 28,
+  `n0ppizy9u8xcadypd2bawceyc` (also `ENTRANCE_ID` in `server/viewer/logic.js`).
+  - The graph is the 36 floor-0 scan points, joined when ≤ 6 m apart and the line between them
+    crosses no wall in `walls_floor1.json`. Dijkstra finds the route.
+  - Heading comes from the localizer yaw and the calibrated pano frame (`pano_frame.json`).
+  - Instructions are spoken as clock directions, repeated every 10 s.
+- **Object memory** (`server/scene_memory.py`): the current frame plus the last 60 s.
+- **Log**: every frame, event and turn goes to `data/agent_log/<session>.jsonl`, for replaying a run.
+- **Expo logs** (`app/src/log.js`): `time [tag] message {details}` with tags `voice`, `ws`, `talk`,
+  `mic`, `loc`, `cam`, `app`. Every clip logs load / loaded / playing (startup_ms) / finished / cut /
+  stalled. The slow-capture log was removed.
+
+Measured with the key (in-process server, stub localizer, real Live API):
+
+- "Take me to the entrance": the agent calls `start_navigation`. The first audio segment reached the
+  phone socket at about 1.8 s, the full reply by about 5 s.
+- Guidance and obstacle events: the whole turn took about 3 s. With streaming, first audio arrives
+  much sooner.
+- **Not yet heard on a real phone with 50 ms segments.**
+
+## Known issues and next steps
+
+1. **50 ms segments will probably be choppy.** Each segment is a separate HTTP fetch through the funnel
+   plus a player load (likely 100–300 ms), far longer than 50 ms of audio. Check `[voice] playing
+   startup_ms` in the Expo log. Fixes:
+   - raise `SEGMENT_BYTES` to 12 000–24 000 (0.25–0.5 s), or
+   - play raw PCM with a streaming player (e.g. `react-native-audio-api`). That needs an Expo dev
+     build instead of Expo Go.
+2. **`LOCALIZATION_SCOPE` defaults to `property`** (a teammate's change). That routes to
+   `server/property_localize.py`, which does not fill `match.ranking` the way `server/localize.py`
+   does, so the place window never becomes confident. Start with `LOCALIZATION_SCOPE=single`, or
+   make the agent read the property localizer's output.
+3. **Guidance turn direction is unverified on site.** Walk the route and check that "turn right"
+   is right.
+4. The 0.70 confidence threshold is untuned on real photos.
+5. Live sometimes embellishes ("it's right ahead"). The prompt forbids it; watch for it.
+6. A Live session drops on errors and reconnects on next use, but loses the conversation.
+
+## Git state (end of session)
+
+- `origin/main` = `945258b`: teammates' 5 commits plus our 23 cherry-picked on top (all tests passed
+  then). Backup of the pre-rebase branch: `origin/feat/voice-agent`.
+- **Uncommitted, ours** (Live agent, streaming, Expo logs, TTS, expo-speech removal):
+  - `server/agent.py`, `server/voice.py`, `server/server.py`, `server/tests/conftest.py`,
+    `server/tests/test_agent.py`
+  - `app/App.js`, `app/src/{voice,log,talk,audio}.js`, `app/test/unit/{voice,log,talk,audio}.test.js`
+  - `app/package.json` / `app/package-lock.json` (expo-speech removed)
+  - Tests at the end: 310 server, 76 app, all passing.
+- **Uncommitted, not ours** (another session or teammate; ask before committing):
+  - `server/viewer/*` and `map3d.js`, `vendor/` (3D map)
+  - `server/config.py`, `server/tests/test_match_payload.py`, `tools/eval_pitch_gate.py`
+  - untracked `HARDCODE.md`, `IMPLEMENT.md`, `VOICE_AGENT.md`, `SESSION-HANDOFF.md`
+- Commits in this repo carry no Co-Authored-By line (user rule).
+
+## Decisions made this session
+
+- Retriever: dinov2-base was A/B tested against small (`tools/eval_retrieval.py`). Not better, so
+  small stays.
+- Matcher: LoMa dropped; SuperPoint+LightGlue stays.
+- `HARDCODE.md` (single floor, OCR/YOLO to tell look-alike sides apart) is a plan only, not
+  implemented on purpose.
+- Meta Llama API was not used (no speech). Gemini only.
+
+---
+
 # Integration handoff
 
 - Part 2, `app/src/speech.js` / `app/App.js`: send actual playback acknowledgments to `POST /api/speech`; measure capture-to-speech-start on the phone's monotonic clock and include the emitted cue ID (see NOTES-part1.md). Current app logs startup speech but does not provide server telemetry.
