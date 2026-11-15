@@ -25,6 +25,17 @@ Rule: quote a number only with where it came from, and say "simulated" when it i
 - **Whose data is it?** The 3D scans come from Matterport through CoStar's hackathon API access; Vexcel aerial imagery came through the same track. The committed deck carries no imagery; the presenting copy credits both.
 - **What if furniture moved since the scan?** Not measured. A match needs many points across the view to agree geometrically, so small changes should matter less than large ones, and a changed place can be taught again with a few phone photos (PROPERTY-LOCALIZATION.md).
 
+## Statistics and tracks
+
+- **Where do your statistics come from?** Public sources, listed with links in NOTES-part2.md: IAPB Vision Atlas (43M blind, 295M moderate to severe, 61M by 2050), CDC VEHSS (7M+ Americans), National Fair Housing Alliance 2025 (54.6% of complaints about disability), WebAIM Million 2026 (95.9% of home pages fail automated checks), CoStar's acquisition release (14M+ Matterport spaces).
+- **Healthcare: is this a medical device?** No. It is an independence and mobility aid, used next to a cane or guide dog. We make no clinical claims and have not run a clinical study.
+- **Gemini: what does Gemini actually do?** Gemini 2.5 Flash receives the spoken question as audio and calls six tools (location, surroundings, start and stop the entrance route, route status, describe the view). Its instructions say to answer from those tools and never guess. Tested with a fake client in our test suite; say so if asked about live reliability.
+- **CoStar: which of the three layers do you use?** (Their criteria: 30% use of the data, combining at least two of CoStar building data, Matterport and Vexcel.) Matterport is the core: all 66 scans of Rabinowitz Hall are the map. We pulled Vexcel aerial imagery of the building, but street-to-door guidance from it is roadmap. CoStar building data is not used yet. Say this plainly.
+- **CoStar: what makes it agentic?** (30% agentic depth.) The Gemini agent decides which tool to call, plans a route to the entrance over the scan points and then guides along it, turn by turn. The cue engine also decides on its own what to say and when.
+- **Amazon: is it agentic and adaptive?** (25% each: creativity, usefulness, technical implementation, user experience.) It reasons and acts: the voice agent picks tools and plans the entrance route; the cue engine decides what to say and when. It adapts to a building from a few labelled phone photos, and keeps a minute of scene memory. It has not yet learned from user feedback; say so if asked.
+- **Peri: who did you build this for?** Only answer with the business you actually consulted this weekend, the person and their role, and the evidence you submitted. Do not stretch it.
+- **CoStar: why does this need CoStar?** The map is the scan library. Without existing 3D scans there is nothing to match against, and every building would first have to be mapped by someone.
+
 ## Business and tech
 
 - **How does this make CoStar money?** A differentiating feature on its listing platforms that opens an underserved audience, built on data competitors do not have.

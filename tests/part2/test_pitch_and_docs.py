@@ -46,7 +46,9 @@ def test_pitch_follows_timed_beats():
 def test_slides_deck():
     prs = Presentation(ROOT / "slides/blindsight.pptx")
     n = len(prs.slides)
-    assert 4 <= n <= 8, "keep slides minimal"
+    # The team asked for problem, statistics, use-case, future and track slides on top of the
+    # original 8; still one message per slide (slides/build_deck.py).
+    assert 4 <= n <= 14, "keep slides focused"
     blob = " ".join(sh.text_frame.text for s in prs.slides for sh in s.shapes if sh.has_text_frame).lower()
     for kw in ("vexcel", "graph", "door", "costar"):
         assert kw in blob, kw

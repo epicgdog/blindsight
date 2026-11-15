@@ -114,6 +114,15 @@ def _plain(shape):
         shape._element.remove(style)
 
 
+def line(s, x1, y1, x2, y2, color, width=1.0):
+    c = s.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, Inches(x1), Inches(y1), Inches(x2), Inches(y2))
+    c.line.color.rgb, c.line.width = color, Pt(width)
+    style = c._element.find(qn("p:style"))
+    if style is not None:
+        c._element.remove(style)
+    return c
+
+
 def chip_width(label):
     return 0.34 + 0.092 * len(label)
 
@@ -182,9 +191,7 @@ def chip(s, x, y, label, fill, color, w=None):
 
 
 def arrow(s, x1, y1, x2, y2, color=MUTED, width=2.0):
-    c = s.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, Inches(x1), Inches(y1), Inches(x2), Inches(y2))
-    c.line.color.rgb = color
-    c.line.width = Pt(width)
+    c = line(s, x1, y1, x2, y2, color, width)
     ln = c.line._get_or_add_ln()
     tail = etree.SubElement(ln, qn("a:tailEnd"))
     tail.set("type", "triangle")
@@ -223,6 +230,11 @@ def fit_picture(s, path, x, y, w, h, alt):
     return picture(s, path, x + (w - pw) / 2, y + (h - ph) / 2, pw, ph, alt)
 
 
+def source(s, words, x=MARGIN, y=6.95, w=12.1, dark=False):
+    """Citation line at the foot of a slide."""
+    text(s, x, y, w, 0.3, words, size=10, color=ON_INK_MUTED if dark else MUTED, name="Source")
+
+
 def footer(s, label, dark=False):
     text(s, MARGIN, 7.0, 8, 0.3, label, size=10, color=ON_INK_MUTED if dark else MUTED,
          name="Footer")
@@ -237,9 +249,10 @@ def s_title(prs, assets):
     text(s, MARGIN, 2.0, 7.6, 1.3, "Blindsight", size=72, bold=True, font=HEAD, color=PAPER,
          name="Title")
     text(s, MARGIN, 3.45, 7.0, 1.4, ONE, size=24, color=ON_INK, line=1.15, name="One sentence")
-    text(s, MARGIN, 6.35, 8.5, 0.4,
+    text(s, MARGIN, 6.45, 12.1, 0.4,
          [[("HackPrinceton 2026", {"bold": True, "color": AMBER}),
-           ("   CoStar track   ·   Demo building: Rabinowitz Hall, Princeton", {})]],
+           ("   " + "  ·  ".join(t["name"] for t in tracks()) + " tracks   ·   "
+            "Demo building: Rabinowitz Hall, Princeton", {})]],
          size=14, color=ON_INK_MUTED, name="Event")
     notes(s, "Open with the problem, never with team names. Say the one sentence first.\n\n" + ONE)
     return s
@@ -276,7 +289,8 @@ def s_insight(prs, assets):
     s = new_slide(prs)
     title(s, "CoStar has already mapped the inside",
           sub="Matterport 3D scans: every scan point is a 360° photo taken at a measured position.")
-    stats = [("66", "scan points in the demo building"), ("2", "floors, one staircase"),
+    stats = [("14M+", "spaces Matterport had scanned when CoStar bought it in 2025"),
+             ("66", "scan points on two floors of our demo building"),
              ("1,584", "views the phone is matched against")]
     for k, (big, small) in enumerate(stats):
         y = 2.25 + k * 1.45
@@ -284,8 +298,10 @@ def s_insight(prs, assets):
              anchor=MSO_ANCHOR.MIDDLE, align=PP_ALIGN.RIGHT, name=f"{small} number")
         text(s, MARGIN + 2.6, y + 0.1, 3.2, 0.7, small, size=17, color=TEXT,
              anchor=MSO_ANCHOR.MIDDLE, name=f"{small} label")
-    text(s, MARGIN, 6.45, 6.0, 0.45, "Built for sighted buyers. Nobody had turned it into guidance.",
+    text(s, MARGIN, 6.3, 6.0, 0.35, "Built for sighted buyers. Nobody had turned it into guidance.",
          size=16, bold=True, color=MUTED, name="Takeaway")
+    source(s, "Matterport count: CoStar press release on closing the acquisition, Feb 28, 2025.",
+           w=6.0)
     box = (6.75, 1.95, 6.0, 4.95)
     shot = assets.get("model") or assets.get("topdown")
     if shot:
@@ -298,8 +314,9 @@ def s_insight(prs, assets):
     else:
         _scan_map(s, *box)
     notes(s, "0:25 to 0:50, the insight.\n\nCoStar already holds a detailed 3D record of a huge "
-          "number of spaces. Our demo building has 66 scan points on two floors; each is a 360 "
-          "degree photo at a known position. It was built for sighted buyers. Nobody has turned "
+          "number of spaces: Matterport had scanned more than 14 million when CoStar bought it. Our "
+          "demo building has 66 scan points on two floors; each is a 360 degree photo at a known "
+          "position. It was built for sighted buyers. Nobody has turned "
           "it into guidance for people who cannot see.")
     return s
 
@@ -326,14 +343,11 @@ def _scan_map(s, x, y, w, h):
         xy = [(x + 0.3 + px * fw, fy + py * fh) for px, py in pts]
         centres[label] = xy
         for a, b in edges:
-            c = s.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, *(Inches(v) for v in (*xy[a], *xy[b])))
-            c.line.color.rgb, c.line.width = LINE, Pt(2)
+            line(s, *xy[a], *xy[b], LINE, 2)
         for cx, cy in xy:
             oval(s, cx, cy, 0.2, fill=AMBER, name="scan point")
     (ax, ay), (bx, by) = centres["Floor 2"][9], centres["Floor 1"][8]
-    stairs = s.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, Inches(ax), Inches(ay + 0.1),
-                                    Inches(bx), Inches(by - 0.1))
-    stairs.line.color.rgb, stairs.line.width = MUTED, Pt(1.5)
+    stairs = line(s, ax, ay + 0.1, bx, by - 0.1, MUTED, 1.5)
     stairs.line.dash_style = MSO_LINE.DASH
     text(s, ax - 0.85, (ay + by) / 2 - 0.15, 0.7, 0.3, "stairs", size=10, color=MUTED,
          align=PP_ALIGN.RIGHT, name="Stairs label")
@@ -544,13 +558,14 @@ def s_roadmap(prs, assets):
 
 def s_close(prs, assets):
     s = new_slide(prs, dark=True)
-    title(s, "Why CoStar wins", dark=True)
+    title(s, "Why Blindsight wins", dark=True)
     rows = [
-        ("trend", "A new audience", "Blind and low-vision buyers and renters on CoStar's listing "
-         "platforms."),
-        ("lock", "A feature competitors cannot copy", "It runs on CoStar's 3D scan library. "
-         "Without the data, there is no map."),
-        ("layers", "No new mapping", "Scans that already exist become voice-guided tours."),
+        ("users", "Independence for millions", "More than 7 million Americans with vision loss "
+         "could walk into a home, an office or a clinic on their own."),
+        ("layers", "Built on data that already exists", "CoStar's 3D scans are the map: no new "
+         "mapping, and competitors cannot copy it without the data."),
+        ("trend", "A path to scale", "A new audience for Homes.com, Apartments.com and LoopNet, "
+         "and every scanned hospital, campus and office."),
     ]
     for k, (ico, head, body) in enumerate(rows):
         y = 1.75 + k * 1.15
@@ -563,8 +578,243 @@ def s_close(prs, assets):
     icon(s, "volume", 11.55, 5.95, 0.62)
     text(s, MARGIN, 5.35, 9.6, 1.3, ONE, size=24, bold=True, font=HEAD, color=AMBER, line=1.1,
          name="One sentence")
-    notes(s, "2:35 to 3:00.\n\nThis gives CoStar a new audience on its listing platforms, and a "
-          "feature competitors cannot copy without this data.\n\n" + ONE)
+    notes(s, "2:35 to 3:00.\n\nFor people with vision loss, this means walking into a home, an "
+          "office or a clinic on their own. For CoStar, it is a new audience on Homes.com, "
+          "Apartments.com and LoopNet, and a feature competitors cannot copy without this "
+          "data.\n\n" + ONE)
+    return s
+
+
+def s_why(prs, assets):
+    s = new_slide(prs)
+    title(s, "Why it needs solving",
+          sub="A large and growing group, already let down by buildings, housing and the web.")
+    stats = [
+        ("43M", "people are blind worldwide; 295M more have moderate to severe vision loss",
+         "IAPB Vision Atlas, 2020"),
+        ("7M+", "Americans have vision loss that glasses or contacts cannot fix",
+         "CDC, Vision and Eye Health Surveillance System"),
+        ("54.6%", "of US housing discrimination complaints in 2024 were about disability, "
+         "the largest share", "National Fair Housing Alliance, 2025 report"),
+        ("95.9%", "of the top million home pages fail automated accessibility checks",
+         "WebAIM Million, 2026"),
+    ]
+    w, gap, top = 2.85, 0.233, 2.05
+    for k, (big, words, cite) in enumerate(stats):
+        x = MARGIN + k * (w + gap)
+        rect(s, x, top, w, 3.45, MIST, name=f"{big} card")
+        text(s, x + 0.3, top + 0.3, w - 0.6, 0.95, big, size=46, bold=True, font=HEAD,
+             color=AMBER, name=f"{big} number")
+        text(s, x + 0.3, top + 1.3, w - 0.6, 1.4, words, size=15, color=TEXT, name=f"{big} words")
+        text(s, x + 0.3, top + 2.85, w - 0.6, 0.45, cite, size=10, color=MUTED,
+             anchor=MSO_ANCHOR.BOTTOM, name=f"{big} source")
+    icon(s, "trend", MARGIN + 0.33, 6.13, 0.62)
+    text(s, MARGIN + 0.85, 5.85, 11.2, 0.6,
+         [[("And it is growing: ", {"bold": True, "color": TEXT}),
+           ("61 million people are expected to be blind by 2050 (IAPB).", {})]],
+         size=17, color=MUTED, anchor=MSO_ANCHOR.MIDDLE, name="Growth")
+    notes(s, "Part of 0:00 to 0:25, about ten seconds.\n\n43 million people are blind worldwide, and "
+          "more than 7 million Americans have vision loss that glasses cannot fix. Disability is "
+          "already the most common basis of housing discrimination complaints in the US, and "
+          "almost every website fails basic accessibility checks.\n\nSources (also in "
+          "NOTES-part2.md): IAPB Vision Atlas 2020; CDC VEHSS; NFHA Fair Housing Trends Report 2025 "
+          "(54.59% of 2024 complaints); WebAIM Million 2026.")
+    return s
+
+
+def s_gap(prs, assets):
+    s = new_slide(prs)
+    title(s, "Why today's tools fall short",
+          sub="Each one solves part of the problem. None of them knows the building.")
+    cols = ["GPS navigation apps", "AI camera apps", "A sighted guide", "Blindsight"]
+    rows = [
+        ("Works inside a building", ["no", "yes", "yes", "yes"]),
+        ("Knows which room you are in", ["no", "some", "yes", "yes"]),
+        ("Says what is in front of you", ["no", "yes", "yes", "yes"]),
+        ("On your own, any time", ["yes", "yes", "no", "yes"]),
+    ]
+    x0, cw, top, rh = 4.75, 2.0, 1.95, 0.82
+    rect(s, x0 + 3 * cw + 0.05, top - 0.05, cw - 0.1, 0.75 + rh * len(rows), AMBER_SOFT,
+         name="Blindsight column")
+    for k, name in enumerate(cols):
+        text(s, x0 + k * cw + 0.1, top + 0.05, cw - 0.2, 0.6, name, size=15, bold=True,
+             color=TEXT, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, name=f"{name} header")
+    marks = {"yes": ("check", GREEN), "no": ("x", RGBColor(0xB4, 0xBE, 0xCA)),
+             "some": ("minus", AMBER)}
+    for r, (label, vals) in enumerate(rows):
+        y = top + 0.75 + r * rh
+        line(s, MARGIN, y, x0 + 3 * cw, y, LINE, 1)
+        text(s, MARGIN, y, x0 - MARGIN - 0.2, rh, label, size=17, color=TEXT,
+             anchor=MSO_ANCHOR.MIDDLE, name=f"{label} label")
+        for k, v in enumerate(vals):
+            ico, fill = marks[v]
+            icon(s, ico, x0 + k * cw + cw / 2, y + rh / 2, 0.46, circle=fill)
+    text(s, MARGIN, 6.3, 12.1, 0.4,
+         [[("Some", {"bold": True, "color": AMBER}),
+           (": camera apps can read a room sign if the camera finds one. Blindsight today is a "
+            "prototype in one building; see “What works today”.", {})]],
+         size=13, color=MUTED, name="Legend")
+    notes(s, "Part of 0:00 to 0:25.\n\nGPS stops at the front door. Camera apps describe a scene, "
+          "but do not know the building. A sighted guide works, but costs your independence. "
+          "Blindsight is the only one that knows the building, because CoStar already scanned it.")
+    return s
+
+
+USE_CASES = [
+    ("apartment", "Homes and apartments", "Tour a listing alone before you sign, on Homes.com or "
+     "Apartments.com."),
+    ("briefcase", "Commercial real estate", "Offices, retail and industrial space on LoopNet."),
+    ("hospital", "Hospitals and clinics", "Find the right department, the elevator, the exit."),
+    ("school", "Campuses", "Classrooms, labs and offices, like Rabinowitz Hall."),
+    ("hotel", "Hotels and venues", "Your room, the lobby, the conference hall."),
+    ("office", "Workplaces", "A first day in a new office, without asking for a guide."),
+]
+
+
+def s_usecases(prs, assets):
+    s = new_slide(prs)
+    title(s, "Use cases")
+    text(s, MARGIN, 1.95, 3.9, 1.6, "One pipeline, any scanned space", size=30, bold=True,
+         font=HEAD, color=TEXT, line=1.05, name="Statement")
+    text(s, MARGIN, 3.6, 3.7, 1.9, "If a building has a Matterport scan, Blindsight can learn it: "
+         "process the scans once, then guide anyone through it by voice.", size=16,
+         color=MUTED, name="Statement body")
+    text(s, MARGIN, 5.75, 3.7, 0.7, "Each new building needs its scans processed and checked "
+         "before anyone relies on it.", size=12, color=MUTED, name="Caveat")
+    x0, cw, top, rh = 5.0, 3.9, 1.95, 1.55
+    for k, (ico, head, body) in enumerate(USE_CASES):
+        x = x0 + (k % 2) * cw
+        y = top + (k // 2) * rh
+        icon(s, ico, x + 0.4, y + 0.42, 0.8)
+        text(s, x + 1.0, y + 0.05, cw - 1.2, 0.45, head, size=18, bold=True, name=f"{head} head")
+        text(s, x + 1.0, y + 0.52, cw - 1.2, 0.9, body, size=14, color=MUTED, name=f"{head} body")
+    notes(s, "Part of 2:00 to 2:35.\n\nThe same pipeline works in any scanned space: a home or "
+          "apartment tour, an office listing, a campus, a hotel or a hospital.")
+    return s
+
+
+FUTURE = [
+    ("1", "Next weeks", "Prove it", [
+        ("Sessions with blind and low-vision users", None),
+        ("Measure accuracy and delay on real phones", None),
+        ("One server mode: taught places and the voice agent", None),
+    ]),
+    ("2", "Next months", "Make it independent", [
+        ("Object detection on the phone itself", "Started"),
+        ("Phone tracking between scan points (ARKit)", "Started"),
+        ("Spatial audio and haptic cues", None),
+        ("Verified routes from surveyed maps", None),
+    ]),
+    ("3", "Later", "Scale it", [
+        ("Process every scanned listing automatically", None),
+        ("Built into Homes.com, Apartments.com and LoopNet", None),
+        ("More languages and voices", None),
+        ("Vexcel guidance from the street to the door", None),
+    ]),
+]
+
+
+def s_future(prs, assets):
+    s = new_slide(prs)
+    title(s, "Making it better", sub="What we would build next, in order. None of this is in the "
+          "demo yet.")
+    w, gap, top = 3.85, 0.275, 1.95
+    for k, (num, when, goal, items) in enumerate(FUTURE):
+        x = MARGIN + k * (w + gap)
+        rect(s, x, top, w, 4.75, MIST, name=f"{when} card")
+        oval(s, x + 0.6, top + 0.6, 0.62, fill=INK if k else AMBER, name=f"{when} number badge")
+        text(s, x + 0.29, top + 0.29, 0.62, 0.62, num, size=20, bold=True, color=PAPER,
+             align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE, name=f"{when} number")
+        text(s, x + 1.1, top + 0.28, w - 1.3, 0.35, when.upper(), size=11, bold=True,
+             color=MUTED, name=f"{when} label")
+        text(s, x + 1.1, top + 0.58, w - 1.3, 0.45, goal, size=19, bold=True, name=f"{when} goal")
+        for i, (item, status) in enumerate(items):
+            y = top + 1.35 + i * 0.82
+            oval(s, x + 0.42, y + 0.17, 0.12, fill=AMBER, name="item dot")
+            runs = [(item, {})] + ([("  ·  " + status.lower(), {"bold": True, "color": AMBER})]
+                                   if status else [])
+            text(s, x + 0.65, y, w - 0.9, 0.7, [runs], size=14, color=TEXT, name=item[:20])
+    notes(s, "Part of 2:00 to 2:35.\n\nNext, we test with blind users and on real phones. Then the "
+          "phone does detection and tracking itself, and later every scanned listing on Homes.com, "
+          "Apartments.com and LoopNet could speak.\n\n'Started': a model export for on-phone "
+          "detection (tools/export_mobile_detector.py) and an ARKit tracking module (never "
+          "compiled yet).")
+    return s
+
+
+# Tracks from HackPrinceton's F26 Main Track and F26 Special Tracks documents and MLH's
+# prize list. Each row: what that track's judges ask for, and how Blindsight answers it.
+TRACKS = [
+    {"name": "Healthcare", "label": "Main track · Best Healthcare Hack", "icon": "hospital",
+     "want": "Improve healthcare delivery, promote wellness or tackle a public health challenge",
+     "we": "Vision loss affects 7M+ Americans. Independent, safer mobility, and finding your way "
+           "in hospitals and clinics"},
+    {"name": "CoStar", "label": "Inside and Out: AI for the Built World", "icon": "layers",
+     "want": "Combine CoStar, Matterport and Vexcel data; agentic; useful; polished",
+     "we": "66 Matterport scans are the map (Vexcel approach is roadmap). The agent plans a route "
+           "and guides along it"},
+    {"name": "Amazon", "label": "Best Practical AI Innovation", "icon": "briefcase",
+     "want": "AI that reasons, plans and acts for real users; their own example is an "
+             "accessibility tool using voice and vision",
+     "we": "That tool: a working prototype for blind and low-vision people, with a clear user, "
+           "docs and a pitch"},
+    {"name": "Gemini", "label": "MLH · Best Use of Gemini API", "icon": "mic",
+     "want": "Push what is possible with the Gemini API",
+     "we": "Gemini 2.5 Flash hears spoken questions as audio, calls six tools and can describe "
+           "the camera view"},
+]
+
+# Peri's Forward Deployed Challenge needs a real business the team consulted this weekend:
+# its name, the person and their role, and one piece of evidence (quote, photo, screenshot).
+# Fill these in from the actual conversation; the Peri row appears only when all are set.
+PERI = {"business": "", "person": "", "role": "", "need": "", "evidence": ""}
+
+
+def tracks():
+    out = list(TRACKS)
+    if all(PERI.values()):
+        out.append({
+            "name": "Peri", "label": "Forward Deployed Challenge", "icon": "users",
+            "want": "Solve a real need for a business you consulted; adoptable now; complete",
+            "we": f"Built with {PERI['business']} ({PERI['person']}, {PERI['role']}): "
+                  f"{PERI['need']}. Evidence: {PERI['evidence']}",
+        })
+    return out
+
+
+def s_tracks(prs, assets):
+    s = new_slide(prs)
+    rows = tracks()
+    title(s, "Built for our tracks",
+          sub="Main track: Best Healthcare Hack, also judged for Best Overall on creativity, "
+              "utility, charity and avidity.")
+    cols = [(MARGIN, 3.35, "TRACK"), (MARGIN + 3.55, 4.0, "WHAT JUDGES ASK FOR"),
+            (MARGIN + 7.75, 4.2, "HOW BLINDSIGHT ANSWERS")]
+    top = 1.95
+    rh = min(0.92, 4.6 / len(rows))
+    rect(s, cols[2][0] - 0.15, top - 0.08, cols[2][1] + 0.3, 0.45 + rh * len(rows) + 0.08,
+         AMBER_SOFT, name="Answer column")
+    for x, w, head in cols:
+        text(s, x, top, w, 0.35, head, size=10, bold=True, color=MUTED, name=f"{head} header")
+    for r, t in enumerate(rows):
+        y = top + 0.45 + r * rh
+        line(s, MARGIN, y, cols[2][0] - 0.15, y, LINE, 1)
+        icon(s, t["icon"], MARGIN + 0.3, y + rh / 2, 0.52, circle=INK)
+        text(s, MARGIN + 0.7, y + 0.06, cols[0][1] - 0.75, rh - 0.1,
+             [[(t["name"], {"bold": True, "size": 15, "color": TEXT})], t["label"]],
+             size=11, color=MUTED, anchor=MSO_ANCHOR.MIDDLE, space_after=1, name=f"{t['name']} track")
+        text(s, cols[1][0], y + 0.06, cols[1][1], rh - 0.1, t["want"], size=13, color=MUTED,
+             anchor=MSO_ANCHOR.MIDDLE, name=f"{t['name']} want")
+        text(s, cols[2][0], y + 0.06, cols[2][1], rh - 0.1, t["we"], size=13, color=TEXT,
+             anchor=MSO_ANCHOR.MIDDLE, name=f"{t['name']} answer")
+    notes(s, "For track judges; skip in the timed pitch if short on time.\n\nHealthcare (main "
+          "track): a public health challenge, independence and safe mobility, hospital "
+          "wayfinding. CoStar: scored 30% data (combine at least two layers), 30% agentic depth, "
+          "25% usefulness, 15% demo; be honest that Vexcel guidance is roadmap and CoStar "
+          "building data is not used yet. Amazon: 25% each creativity, usefulness, technical "
+          "implementation, user experience; needs a working demo, clear user, docs and a pitch. "
+          "Gemini (MLH): the voice agent hears audio, uses tools and is told never to guess. "
+          "Peri: name the business, the person and their role, and show the evidence.")
     return s
 
 
@@ -575,7 +825,8 @@ ASSETS = {
     "vexcel": Path("data/vexcel/vexcel_rabinowitz.jpg"),
     "viewer": Path("data/reports/viewer.png"),
 }
-SLIDES = (s_title, s_problem, s_insight, s_demo, s_how, s_built, s_roadmap, s_close)
+SLIDES = (s_title, s_problem, s_why, s_gap, s_insight, s_demo, s_how, s_built, s_usecases,
+          s_roadmap, s_future, s_tracks, s_close)
 
 
 def build(out: Path, assets: dict) -> Presentation:

@@ -21,3 +21,13 @@ Branch is `part_2` (the brief says `part2-app`; the requester asked for `part_2`
 ## Measured numbers
 
 None yet. The pitch uses no numeric claims. Add real measurements here before quoting them.
+
+## Sourced statistics (public sources, checked 2026-11-15)
+
+Quoted on slides 3 and 5 and in the pitch. External figures, not project measurements.
+
+- 43 million people blind worldwide, 295 million with moderate to severe vision impairment (2020), 61 million blind projected by 2050: IAPB Vision Atlas, Magnitude of Vision Loss evidence series, https://www.iapb.org/wp-content/uploads/2021/02/Vision-Atlas_Evidence-Series_Magnitude-of-VIsion-Loss_24022021.pdf
+- More than 7 million Americans with best-corrected visual acuity loss (vision loss glasses or contacts cannot fix): CDC Vision and Eye Health Surveillance System, https://www.cdc.gov/vision-health-data/prevalence-estimates/vision-loss-prevalence.html
+- 54.6% (54.59%) of 2024 US housing discrimination complaints were based on disability, the largest share: National Fair Housing Alliance, 2025 Fair Housing Trends Report, https://nationalfairhousing.org/reports/2025-fair-housing-trends-report/
+- 95.9% of the top one million home pages had detectable WCAG 2 failures (February 2026 scan): WebAIM Million 2026, https://webaim.org/projects/million/
+- More than 14 million spaces digitized by Matterport when CoStar completed the acquisition (February 28, 2025): CoStar Group press release, https://www.businesswire.com/news/home/20250228873241/en
