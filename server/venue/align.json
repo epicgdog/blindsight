@@ -1,0 +1,25 @@
+{
+ "1": {
+  "scale": 7.5,
+  "rot": 0.0,
+  "tx": 491.81,
+  "ty": 408.55,
+  "points_on_walkable": "32/36",
+  "method": "scan points on walkable pixels"
+ },
+ "2": {
+  "scale": 7.55,
+  "rot": 0.0,
+  "tx": 429.38,
+  "ty": 419.35,
+  "points_on_walkable": "24/29",
+  "method": "scan points on walkable pixels"
+ },
+ "A": {
+  "scale": 7.5,
+  "rot": 0.0,
+  "tx": 425.81,
+  "ty": 481.55,
+  "method": "registered to level 1 by wall overlap: A px + (66, -73) = level 1 px"
+ }
+}

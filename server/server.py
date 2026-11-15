@@ -41,6 +41,7 @@ from server.cues import describe
 from server.detect import Detector, StubDetector
 from server.minimap import scan_points
 from server.navigation import navigation_router
+from server.venue import Venue, mount_venue_images, venue_router
 from server.protocol import FramePacket, ProtocolError, decode_frame, parse_imu
 from server.record import SessionRecorder
 from server.spatial import spatial_router
@@ -550,6 +551,17 @@ def create_app(
     )
     app.include_router(spatial_router(settings.data_dir))
 
+    # HackPrinceton venue: room search and routes across levels (server/venue.py).
+    venue = Venue.load()
+    app.state.venue = venue
+
+    def venue_start():
+        agent = getattr(getattr(app.state, "runtime", None), "agent", None)
+        state = getattr(agent, "state", None)
+        return venue.start_from_position(getattr(state, "position", None)) if state is not None else None
+
+    app.include_router(venue_router(lambda: venue, venue_start))
+
     @app.get("/")
     async def index():
         path = settings.viewer_dir / "index.html"
@@ -912,6 +924,7 @@ def create_app(
     # Serve only public pano images, never sessions, credentials or on-site captures.
     app.mount("/data/pano", StaticFiles(directory=settings.data_dir / "pano", check_dir=False))
     app.mount("/viewer", StaticFiles(directory=settings.viewer_dir, check_dir=False))
+    mount_venue_images(app)
 
     @app.get("/{asset:path}")
     async def viewer_asset(asset: str):
