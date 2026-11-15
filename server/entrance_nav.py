@@ -183,12 +183,16 @@ def straighten(coords: list, walls: np.ndarray) -> list:
 
 
 def plan(emap: EntranceMap, xy, node: str) -> Route | None:
-    """Route from xy (standing next to map node `node`) to the entrance, or None if unreachable.
-    The scan point path is straightened: it bends only where walls are in the way."""
+    """Route from xy (standing next to map node `node`) to the destination, or None if unreachable.
+    Scan point path to the destination's node, then a straight last leg to a dropped pin; the
+    whole path is straightened so it bends only where walls are in the way."""
     found = shortest_path(emap.graph, node, emap.goal)
     if found is None:
         return None
-    return Route(straighten([xy] + [emap.points[n] for n in found[0]], emap.walls))
+    coords = [xy] + [emap.points[n] for n in found[0]]
+    if math.dist(coords[-1], emap.goal_xy) > 0.05:
+        coords.append(emap.goal_xy)
+    return Route(straighten(coords, emap.walls))
 
 
 def steps_text(meters: float, stride: float) -> str:
@@ -204,6 +208,11 @@ class EntranceMap:
                  frames: dict[str, np.ndarray], goal: str | None = None, goal_label: str = "the entrance"):
         self.points, self.labels, self.walls, self.frames = points, labels, walls, frames
         self.goal, self.goal_label = goal, goal_label
+        # The destination: graph node the route ends on (goal), the point itself (goal_xy) and its
+        # kind. The entrance is a scan point; a dropped pin is any point near one.
+        self.entrance, self.entrance_label = goal, goal_label
+        self.goal_xy = points.get(goal) if goal is not None else None
+        self.goal_kind = "entrance"
         self.graph = build_graph(points, walls, MAX_EDGE_M)
         self.max_edge_m = MAX_EDGE_M
         if goal is not None and goal in points and self.unreachable(goal):
@@ -226,6 +235,45 @@ class EntranceMap:
         labels = {p["id"]: (f"scan point {p['label']}" if p.get("label") is not None else p["id"]) for p in pts}
         return cls({p["id"]: (float(p["x"]), float(p["y"])) for p in pts}, labels, walls,
                    load_frames(data_dir), goal, goal_label)
+
+    def pin_node(self, xy) -> tuple[str, tuple[float, float], bool] | None:
+        """The scan point a route to `xy` ends its graph part on, the reachable point, and whether
+        the point was moved. Nearest scan point with a clear line to xy within max_edge_m; with
+        none (inside a wall, outside the scan), xy moves onto the nearest scan point."""
+        if not self.points:
+            return None
+        p = (float(xy[0]), float(xy[1]))
+        by_dist = sorted(self.points, key=lambda n: math.dist(p, self.points[n]))
+        for n in by_dist:
+            if math.dist(p, self.points[n]) > self.max_edge_m:
+                break
+            if n in self.graph and clear_line(self.points[n], p, self.walls):
+                return n, p, False
+        return by_dist[0], self.points[by_dist[0]], True
+
+    def set_destination(self, xy, label: str = "your pin") -> dict:
+        found = self.pin_node(xy)
+        if found is None:
+            return {"ok": False, "reason": "no map"}
+        node, point, moved = found
+        if self.entrance in self.points and shortest_path(self.graph, node, self.entrance) is None:
+            return {"ok": False, "reason": "that spot is not connected to the rest of the floor"}
+        self.goal, self.goal_xy, self.goal_label, self.goal_kind = node, point, label, "pin"
+        return {"ok": True, "x": round(point[0], 2), "y": round(point[1], 2), "moved": moved,
+                "label": label, "kind": "pin"}
+
+    def clear_destination(self) -> dict:
+        self.goal, self.goal_label, self.goal_kind = self.entrance, self.entrance_label, "entrance"
+        self.goal_xy = self.points.get(self.entrance) if self.entrance is not None else None
+        return {"ok": True, "label": self.goal_label, "kind": "entrance"}
+
+    def destination(self) -> dict:
+        xy = self.goal_xy
+        return {"label": self.goal_label, "kind": self.goal_kind,
+                "x": round(xy[0], 2) if xy else None, "y": round(xy[1], 2) if xy else None}
+
+    def at_destination(self, xy, node: str, within: float) -> bool:
+        return node == self.goal and self.goal_xy is not None and math.dist(xy, self.goal_xy) <= within
 
     def label(self, pid: str | None) -> str:
         if pid is None:
@@ -258,18 +306,18 @@ def _legs(route: Route, heading: float | None, stride: float = STRIDE_M) -> list
 def describe_route(emap: EntranceMap, place: str | None, yaw_deg: float | None = None,
                    position: dict | None = None, heading_deg: float | None = None,
                    stride: float = STRIDE_M) -> dict:
-    """The whole path from `place` to the entrance as walking legs, for the agent to explain.
+    """The whole path from `place` to the destination as walking legs, for the agent to explain.
 
     The same Route the guide follows, so the numbers match the spoken guidance."""
     pts = emap.points
     if place is None or place not in pts:
         return {"ok": False, "reason": "position not known yet; hold the phone steady"}
     xy, node = start_point(emap, place, position)
-    if node == emap.goal and math.dist(xy, pts[emap.goal]) < WAYPOINT_M:
+    if emap.at_destination(xy, node, WAYPOINT_M):
         return {"ok": True, "at_destination": True, "total_m": 0.0, "legs": []}
     route = plan(emap, xy, node)
     if route is None:
-        return {"ok": False, "reason": "no route to the entrance from here"}
+        return {"ok": False, "reason": f"no route to {emap.goal_label} from here"}
     heading = None if heading_deg is None else float(heading_deg)
     M = emap.frames.get(node)
     if heading is None and yaw_deg is not None and M is not None:
@@ -287,7 +335,7 @@ def route_sentence(r: dict) -> str:
     if not r.get("ok"):
         return r.get("reason", "no route")
     if r.get("at_destination"):
-        return "already at the entrance"
+        return f"already at {r.get('destination', 'the destination')}"
     steps = "; then ".join(f"{leg['do']}, about {leg.get('steps', leg['meters'])} steps" for leg in r["legs"])
     total = r.get("total_steps") or max(1, round(r["total_m"] / STRIDE_M))
     return f"about {total} steps to {r['destination']}: {steps}"
@@ -367,9 +415,9 @@ class EntranceGuide:
         else:
             self.last_text, self.reminded = key, False
         self.last_t = t
-        if text.startswith(ARRIVED[:-1]):
+        if text.startswith("You're at "):
             self.stop()
-            self.status = {"active": False, "arrived": True}
+            self.status = {"active": False, "arrived": True, "destination": self.map.goal_label}
         return text
 
     def _instruction(self, t, place, state, yaw_deg, position, heading_deg, steps, fresh=True) -> str | None:
@@ -378,21 +426,21 @@ class EntranceGuide:
             self.status = {**self.status, "paused": True}
             return "Hold the phone steady and I'll find the path."
         xy, node = start_point(self.map, place, position)
-        if node == self.map.goal:
-            return ARRIVED
+        if self.map.at_destination(xy, node, ARRIVE_M):
+            return self.arrived_text
         if self.route is None and not self._plan(xy, node):
-            return "I can't find a route to the entrance from here."
+            return f"I can't find a route to {self.map.goal_label} from here."
         trusted = _trusted(position)
         sigma = float(position["sigma_m"]) if trusted else None
         self.progress.update(t, xy if trusted else None, sigma, steps, fix=fresh)
         prefix = ""
         if self.progress.off_route():
             if not self._plan(xy, node):
-                return "Let me find a new way. I can't find a route to the entrance from here."
+                return f"Let me find a new way. I can't find a route to {self.map.goal_label} from here."
             prefix = "Let me find a new way. "
         s = self.progress.s
         if self.route.length - s <= ARRIVE_M:
-            return ARRIVED
+            return self.arrived_text
         M = self.map.frames.get(node)
         if heading_deg is not None:
             heading = float(heading_deg)
@@ -449,8 +497,17 @@ class EntranceGuide:
             self.said.add((self.k, "five"))  # the leg text already says how close the turn is
         dist = steps_text(m.s - s, self.stride)
         if m.say == "arrive":
-            return f"Go straight about {dist} to the entrance."
+            return f"Go straight about {dist} to {self.map.goal_label}."
         return f"Go straight about {dist}, then {m.say}."
+
+    @property
+    def arrived_text(self) -> str:
+        return f"You're at {self.map.goal_label}."
+
+    def replan(self, start_place: str | None, position: dict | None) -> dict:
+        """The destination changed: start over toward it from where the person is now."""
+        self.stop()
+        return self.start(start_place, position)
 
     @property
     def stride(self) -> float:
@@ -459,7 +516,8 @@ class EntranceGuide:
 
     def _status(self, s: float, heading: float | None) -> dict:
         m = self.route.maneuvers[self.k]
-        out = {"active": True, "next": "the entrance" if m.say == "arrive" else m.say,
+        out = {"active": True, "next": self.map.goal_label if m.say == "arrive" else m.say,
+               "next_is_destination": m.say == "arrive", "destination": self.map.goal_label,
                "next_m": round(max(0.0, m.s - s), 1), "remaining_m": round(max(0.0, self.route.length - s), 1),
                "waypoints_left": len(self.route.maneuvers) - self.k,
                "next_steps": max(0, round(max(0.0, m.s - s) / self.stride)),

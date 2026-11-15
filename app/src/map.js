@@ -76,6 +76,12 @@ export const headingText = (h) =>
 // ---- server urls (http base from the websocket url, like talk.js / ack.js) ----
 export const panoUrl = (wsUrl) => { const b = serverBase(wsUrl); return b ? `${b}/api/pano` : null; };
 export const metricsUrl = (wsUrl) => { const b = serverBase(wsUrl); return b ? `${b}/metrics` : null; };
+// Dropped pin: preview (GET, no change) and set or clear (POST).
+export const destUrl = (wsUrl, x, y) => {
+  const b = serverBase(wsUrl);
+  if (!b) return null;
+  return x == null ? `${b}/api/agent/destination` : `${b}/api/agent/destination?x=${x.toFixed(2)}&y=${y.toFixed(2)}`;
+};
 export const navUrl = (wsUrl, on) => { const b = serverBase(wsUrl); return b ? `${b}/api/agent/nav?on=${on ? 1 : 0}` : null; };
 
 // ---- static map: ground floor only, like the web viewer ----
@@ -243,8 +249,8 @@ const cap = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
 // Banner content: { title, meters, arrow, tone } for every screen state.
 export function banner({ connected, nav, position }) {
   if (!connected) return { title: "Connecting…", meters: "", arrow: null, tone: "wait" };
-  if (nav?.arrived) return { title: "You're at the entrance", meters: "", arrow: "arrive", tone: "done" };
-  if (!nav?.active) return { title: "Guidance off", meters: "", arrow: null, tone: "off" };
+  if (nav?.arrived) return { title: `You're at ${nav.destination ?? "the entrance"}`, meters: "", arrow: "arrive", tone: "done" };
+  if (!nav?.active) return { title: "Add a pin to choose where to go", meters: "", arrow: null, tone: "off" };
   if (!hasXY(position) || nav.paused || !nav.next) return { title: "Hold steady, finding you…", meters: "", arrow: null, tone: "wait" };
   const meters = metersText(nav.next_m);
   // Facing away from the route: the turn to make now comes first.
@@ -252,7 +258,8 @@ export function banner({ connected, nav, position }) {
     const arrow = turnArrow(nav.turn_deg);
     return { title: ARROW_TEXT[arrow] ?? "Turn", meters: "", arrow, tone: "go" };
   }
-  if (nav.next === "the entrance") return { title: "Continue to the entrance", meters, arrow: "straight", tone: "go" };
+  if (nav.next_is_destination || nav.next === "the entrance")
+    return { title: `Continue to ${nav.destination ?? nav.next}`, meters, arrow: "straight", tone: "go" };
   return { title: cap(nav.next), meters, arrow: nextArrow(nav.next), tone: "go" };
 }
 

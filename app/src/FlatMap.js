@@ -3,7 +3,7 @@
 // The "you" dot and its arrow lerp toward the latest fix at ~30 fps, on their own layer so the
 // walls are not redrawn each tick.
 import React, { memo, useEffect, useMemo, useRef, useState } from "react";
-import { StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import Svg, { Circle, Line, Path, Polygon, Polyline } from "react-native-svg";
 
 // Fraction of the remaining gap closed per second (frame-rate independent): 1 - exp(-LERP_RATE * dt).
@@ -24,18 +24,21 @@ function frameOf(map) {
   const minY = Math.min(...ys) - MARGIN_M, maxY = Math.max(...ys) + MARGIN_M;
   const px = (x) => +((x - minX) * PX_PER_M).toFixed(1);
   const py = (y) => +((maxY - y) * PX_PER_M).toFixed(1); // north (larger y) at the top
-  return { pts, px, py, viewBox: `0 0 ${px(maxX)} ${py(minY)}` };
+  return { pts, px, py, minX, maxY, vbW: px(maxX), vbH: py(minY), viewBox: `0 0 ${px(maxX)} ${py(minY)}` };
 }
 
 // Walls, route, scan points, entrance: redrawn only when their inputs change.
-const StaticLayer = memo(function StaticLayer({ f, map, path, ranking, activeId, debugDots }) {
+const StaticLayer = memo(function StaticLayer({ f, map, path, ranking, activeId, debugDots, preview }) {
   const { pts, px, py } = f;
   const ranked = debugDots ? (ranking ?? []).map((r) => r.place) : [];
   const walls = (map.walls ?? []).map(([x1, y1, x2, y2]) => `M${px(x1)} ${py(y1)}L${px(x2)} ${py(y2)}`).join("");
-  const route = path?.pts?.length > 1 ? path.pts.map(([x, y]) => `${px(x)},${py(y)}`).join(" ") : null;
-  const goal = pts.find((p) => p.id === ENTRANCE_ID) ?? (path?.goal ? { x: path.goal[0], y: path.goal[1] } : null);
+  const route = path?.guiding && path?.pts?.length > 1 ? path.pts.map(([x, y]) => `${px(x)},${py(y)}`).join(" ") : null;
+  const entrance = pts.find((p) => p.id === ENTRANCE_ID) ?? (path?.entrance ? { x: path.entrance[0], y: path.entrance[1] } : null);
+  const pin = path?.goal_kind === "pin" && path?.goal ? { x: path.goal[0], y: path.goal[1] } : null;
+  const pv = preview?.pts?.length > 1 ? preview.pts.map(([x, y]) => `${px(x)},${py(y)}`).join(" ") : null;
+  const pvPin = preview && Number.isFinite(preview.x) ? { x: preview.x, y: preview.y } : null;
   return (
-    <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox={f.viewBox} preserveAspectRatio="xMidYMid meet">
+    <Svg pointerEvents="none" style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox={f.viewBox} preserveAspectRatio="xMidYMid meet">
       {walls ? <Path d={walls} stroke="#9aa0a6" strokeWidth={6} strokeLinecap="round" fill="none" /> : null}
       {route ? <Polyline points={route} stroke="#ffffff" strokeWidth={22} strokeLinecap="round" strokeLinejoin="round" fill="none" /> : null}
       {route ? <Polyline points={route} stroke={path?.guiding ? "#1a73e8" : "#7baaf7"} strokeWidth={14} strokeLinecap="round" strokeLinejoin="round" fill="none" /> : null}
@@ -45,10 +48,34 @@ const StaticLayer = memo(function StaticLayer({ f, map, path, ranking, activeId,
         return <Circle key={p.id} cx={px(p.x)} cy={py(p.y)} r={kind === "point" ? 7 : 12}
           fill={kind === "active" ? "#17c964" : kind === "candidate" ? "#f5a524" : "#bdc1c6"} />;
       })}
-      {goal ? <Circle cx={px(goal.x)} cy={py(goal.y)} r={18} fill="#d93025" stroke="#fff" strokeWidth={5} /> : null}
+      {/* The entrance stays on the map; smaller and grey while a pin is the destination. */}
+      {entrance ? <Circle cx={px(entrance.x)} cy={py(entrance.y)} r={pin ? 12 : 18} fill={pin ? "#80868b" : "#d93025"} stroke="#fff" strokeWidth={5} /> : null}
+      {pin ? <PinMark x={px(pin.x)} y={py(pin.y)} color="#d93025" /> : null}
+      {pv ? <Polyline points={pv} stroke="#1a73e8" strokeWidth={10} strokeDasharray="22 16" strokeLinecap="round" fill="none" /> : null}
+      {pvPin ? <PinMark x={px(pvPin.x)} y={py(pvPin.y)} color="#f29900" /> : null}
     </Svg>
   );
 });
+
+// A touch in the map area (points) -> map metres: undo the viewBox "meet" fit, then the drawing
+// scale. Null outside the drawing.
+export function screenToMap(f, box, lx, ly) {
+  const scale = Math.min(box.width / f.vbW, box.height / f.vbH);
+  if (!(scale > 0)) return null;
+  const offX = (box.width - f.vbW * scale) / 2, offY = (box.height - f.vbH * scale) / 2;
+  const vx = (lx - offX) / scale, vy = (ly - offY) / scale;
+  if (vx < 0 || vy < 0 || vx > f.vbW || vy > f.vbH) return null;
+  return { x: f.minX + vx / PX_PER_M, y: f.maxY - vy / PX_PER_M };
+}
+
+// Map pin: a teardrop standing on its point.
+function PinMark({ x, y, color }) {
+  const d = `M${x} ${y} C${x - 10} ${y - 24} ${x - 30} ${y - 34} ${x - 30} ${y - 56} A30 30 0 1 1 ${x + 30} ${y - 56} C${x + 30} ${y - 34} ${x + 10} ${y - 24} ${x} ${y} Z`;
+  return (<>
+    <Path d={d} fill={color} stroke="#fff" strokeWidth={5} />
+    <Circle cx={x} cy={y - 56} r={11} fill="#fff" />
+  </>);
+}
 
 // Lerp toward the latest value every TICK_MS. mix(cur, target, k) does the blend; the first value
 // is taken as is, and a missing value clears it.
@@ -77,7 +104,8 @@ const mixPoint = (a, b, k) => ({ x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) 
 // Shortest way round: 350 -> 10 goes through 0, not 180.
 const mixAngle = (a, b, k) => { const d = ((b - a + 540) % 360) - 180; return (a + d * k + 360) % 360; };
 
-export default function FlatMap({ map, path, position, headingDeg, ranking, activeId, debugDots = false, insetTop = 150, insetBottom = 110 }) {
+export default function FlatMap({ map, path, position, headingDeg, ranking, activeId, debugDots = false, insetTop = 150, insetBottom = 110,
+  preview = null, onTapMap = null }) {
   const f = useMemo(() => frameOf(map), [map]);
   const { height: winH } = useWindowDimensions();
   const areaH = Math.max(120, winH - insetTop - insetBottom); // explicit: layout-derived heights came out 0
@@ -109,15 +137,20 @@ export default function FlatMap({ map, path, position, headingDeg, ranking, acti
 
   return (
     <View style={s.root}>
-      <View style={[s.area, { top: insetTop, height: areaH }]} onLayout={(e) => setBox(e.nativeEvent.layout)}>
+      <Pressable style={[s.area, { top: insetTop, height: areaH }]} onLayout={(e) => setBox(e.nativeEvent.layout)}
+        disabled={!onTapMap} onPress={(e) => {
+          // Only in "add pin" mode (onTapMap set): the tap is where the pin goes.
+          const m = box && onTapMap ? screenToMap(f, box, e.nativeEvent.locationX, e.nativeEvent.locationY) : null;
+          if (m) onTapMap(m);
+        }} accessible={false}>
         {box && (box.width < 10 || box.height < 10) ? <Text style={s.note}>Map area is {Math.round(box.width)} x {Math.round(box.height)}</Text> : null}
-        <StaticLayer f={f} map={map} path={path} ranking={ranking} activeId={activeId} debugDots={debugDots} />
-        <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox={f.viewBox} preserveAspectRatio="xMidYMid meet">
+        <StaticLayer f={f} map={map} path={path} ranking={ranking} activeId={activeId} debugDots={debugDots} preview={preview} />
+        <Svg pointerEvents="none" style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox={f.viewBox} preserveAspectRatio="xMidYMid meet">
           {arrow ? <Line x1={here.x} y1={here.y} x2={arrow.tip[0]} y2={arrow.tip[1]} stroke="#1a73e8" strokeWidth={8} /> : null}
           {arrow ? <Polygon points={arrow.head} fill="#1a73e8" /> : null}
           {here ? <Circle cx={here.x} cy={here.y} r={16} fill="#1a73e8" stroke="#fff" strokeWidth={6} /> : null}
         </Svg>
-      </View>
+      </Pressable>
     </View>
   );
 }

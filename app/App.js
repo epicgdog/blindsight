@@ -30,7 +30,7 @@ import NativeNavigation, { trackingModule } from "./NativeNavigation";
 import FlatMap from "./src/FlatMap";
 import { BugIcon, CompassIcon, MicIcon, SpeakerIcon, TurnIcon } from "./src/Icons";
 import { accuracyText, banner, bottomBar, boxStyle, frameMatch, framePosition, headingText, mapMode, metricsUrl,
-  navUrl, panoUrl, rankRows, whyLines } from "./src/map";
+  navUrl, panoUrl, rankRows, whyLines, destUrl } from "./src/map";
 
 const KEY = "blindsight.server";
 const DEBUG_KEY = "blindsight.debugOpen";
@@ -347,6 +347,36 @@ function LegacyApp() {
   const nav = result?.agent?.nav ?? null;
   const navActive = !!nav?.active;
   // Exit / Start: guidance off or on at the server; shown at once, the next frame carries the truth.
+  // Dropped pin: long-press the map -> preview card (where it lands, route length) -> Start or Cancel.
+  const [pinDraft, setPinDraft] = useState(null); // { x, y, moved, length_m, pts } from the preview
+  const [pinMode, setPinMode] = useState(false); // "Add pin" pressed: the next map tap drops the pin
+  const onTapMap = useCallback(async (m) => {
+    setPinMode(false);
+    const url = destUrl(normalizeServerUrl(addressRef.current), m.x, m.y);
+    if (!url) return;
+    setPinDraft({ x: m.x, y: m.y, loading: true });
+    try {
+      const p = await (await fetch(url)).json();
+      logApp("pin preview", p);
+      setPinDraft(p?.ok ? p : { x: m.x, y: m.y, error: p?.reason ?? "can't route there" });
+    } catch (e) { setPinDraft({ x: m.x, y: m.y, error: e?.message ?? "preview failed" }); }
+  }, []);
+  const postDest = useCallback(async (body) => {
+    const url = destUrl(normalizeServerUrl(addressRef.current));
+    if (!url) return null;
+    try {
+      const r = await (await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+      logApp("destination", r);
+      return r;
+    } catch (e) { logApp("destination failed", { error: e?.message }); return null; }
+  }, []);
+  const startPin = useCallback(async () => {
+    const d = pinDraft;
+    setPinDraft(null);
+    if (d && Number.isFinite(d.x)) await postDest({ x: d.x, y: d.y });
+  }, [pinDraft, postDest]);
+  const clearPin = useCallback(() => postDest({ entrance: true }), [postDest]);
+
   const toggleNav = useCallback(async () => {
     const on = !navActive;
     const url = navUrl(normalizeServerUrl(addressRef.current), on);
@@ -400,7 +430,8 @@ function LegacyApp() {
     <View style={[s.root, { height: winH, width: winW }]}>
       <StatusBar barStyle="dark-content" />
       <FlatMap map={mapData?.map} path={path} position={position} headingDeg={facing?.heading_deg} ranking={frameMatch(result)?.ranking} activeId={result?.agent?.decision?.place} debugDots={debugDots}
-        insetTop={TOP + 120} insetBottom={debugOpen ? sheetH + 8 : BOTTOM + BAR_H + 8} />
+        insetTop={TOP + 120} insetBottom={debugOpen ? sheetH + 8 : BOTTOM + BAR_H + 8}
+        preview={pinDraft?.ok || pinDraft?.loading ? pinDraft : null} onTapMap={pinMode && status.connected ? onTapMap : null} />
 
       <View style={s.top} pointerEvents="box-none">
         <View style={[s.banner, b.tone === "go" || b.tone === "done" ? s.bannerGo : s.bannerWait]}>
@@ -435,19 +466,55 @@ function LegacyApp() {
       </View>
       {accuracy ? <View style={s.chip}><Text style={s.chipText}>{accuracy}</Text></View> : null}
 
+      {pinMode ? (
+        <View style={s.pinCard} pointerEvents="none">
+          <Text style={s.pinTitle}>Tap the map where you want to go</Text>
+        </View>
+      ) : pinDraft ? (
+        <View style={s.pinCard}>
+          <Text style={s.pinTitle}>
+            {pinDraft.loading ? "Finding a route…" : pinDraft.error ? `Can't go there: ${pinDraft.error}`
+              : `Dropped pin${pinDraft.length_m != null ? ` · ${Math.round(pinDraft.length_m)} m` : ""}`}
+          </Text>
+          {pinDraft.moved ? <Text style={s.pinNote}>Moved to the nearest reachable spot</Text> : null}
+          <View style={s.pinRow}>
+            <Pressable style={s.pinCancel} onPress={() => setPinDraft(null)} accessibilityRole="button">
+              <Text style={s.pinCancelText}>Cancel</Text>
+            </Pressable>
+            {pinDraft.ok ? (
+              <Pressable style={s.pinStart} onPress={startPin} accessibilityRole="button" accessibilityLabel="Start guidance to the pin">
+                <Text style={s.pinStartText}>Start</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      ) : path?.goal_kind === "pin" ? (
+        <Pressable style={s.pinChip} onPress={clearPin} accessibilityRole="button" accessibilityLabel="Clear pin, go back to the entrance">
+          <Text style={s.pinChipText}>📍 {path.goal_label ?? "your pin"} · Clear</Text>
+        </Pressable>
+      ) : null}
+
       <View style={s.bar}>
         <View style={s.barText} accessible>
           {bar.time ? (
             <Text style={s.barLine}><Text style={s.barTime}>{bar.time}</Text><Text style={s.barLeft}>{"  ·  "}{bar.left}</Text></Text>
           ) : (
-            <Text style={s.barIdle}>{nav?.arrived ? "Arrived" : !running ? "Not started" : !status.connected ? "Offline" : navActive ? "Finding the route…" : "Guidance off"}</Text>
+            <Text style={s.barIdle}>{nav?.arrived ? "Arrived" : !running ? "Not started" : !status.connected ? "Offline" : navActive ? "Finding the route…" : "No destination"}</Text>
           )}
           {result?.agent?.place_label && decision?.state !== "unknown" ? <Text style={s.barPlace} numberOfLines={1}>{result.agent.place_label}</Text> : null}
         </View>
-        <Pressable style={[s.exit, !navActive && s.startNav, !status.connected && s.disabled]} onPress={toggleNav} disabled={!status.connected}
-          hitSlop={8} accessibilityRole="button" accessibilityLabel={navActive ? "Exit guidance" : "Start guidance"}>
-          <Text style={s.exitText}>{navActive ? "Exit" : "Start"}</Text>
-        </Pressable>
+        {navActive ? (
+          <Pressable style={[s.exit, !status.connected && s.disabled]} onPress={toggleNav} disabled={!status.connected}
+            hitSlop={8} accessibilityRole="button" accessibilityLabel="Exit guidance">
+            <Text style={s.exitText}>Exit</Text>
+          </Pressable>
+        ) : (
+          <Pressable style={[s.exit, s.startNav, pinMode && s.pinModeOn, !status.connected && s.disabled]} disabled={!status.connected}
+            onPress={() => { setPinDraft(null); setPinMode((m) => !m); }} hitSlop={8} accessibilityRole="button"
+            accessibilityLabel={pinMode ? "Cancel adding a pin" : "Add pin"}>
+            <Text style={s.exitText}>{pinMode ? "Cancel" : "Add pin"}</Text>
+          </Pressable>
+        )}
       </View>
 
       <Animated.View style={[s.sheet, { height: sheetH, transform: [{ translateY: Animated.add(sheetY, drag) }] }]} pointerEvents={debugOpen ? "auto" : "none"}
@@ -534,6 +601,19 @@ const s = StyleSheet.create({
   chip: { position: "absolute", left: 12, bottom: BOTTOM + BAR_H + 16, backgroundColor: "#fff", borderRadius: 14,
     paddingHorizontal: 12, paddingVertical: 6, ...shadow },
   chipText: { color: "#3c4043", fontSize: 14, fontWeight: "600" },
+  pinCard: { position: "absolute", left: 10, right: 10, bottom: BOTTOM + BAR_H + 12, backgroundColor: "#fff", borderRadius: 16,
+    padding: 14, gap: 6, ...shadow },
+  pinTitle: { color: "#202124", fontSize: 18, fontWeight: "700" },
+  pinNote: { color: "#5f6368", fontSize: 14 },
+  pinRow: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 4 },
+  pinCancel: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 20, backgroundColor: "#f1f3f4" },
+  pinCancelText: { color: "#1a73e8", fontSize: 16, fontWeight: "700" },
+  pinStart: { paddingVertical: 10, paddingHorizontal: 22, borderRadius: 20, backgroundColor: "#1a73e8" },
+  pinStartText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  pinModeOn: { backgroundColor: "#5f6368" },
+  pinChip: { position: "absolute", left: 12, bottom: BOTTOM + BAR_H + 60, backgroundColor: "#fff", borderRadius: 18,
+    paddingVertical: 8, paddingHorizontal: 14, ...shadow },
+  pinChipText: { color: "#202124", fontSize: 15, fontWeight: "600" },
   bar: { position: "absolute", left: 10, right: 10, bottom: BOTTOM, height: BAR_H, backgroundColor: "#fff", borderRadius: 20,
     flexDirection: "row", alignItems: "center", paddingHorizontal: 18, gap: 12, ...shadow },
   barText: { flex: 1 },

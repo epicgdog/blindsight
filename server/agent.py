@@ -57,7 +57,7 @@ TALK_TIMEOUT_S = 25.0
 HAZARD_REPEAT_S = 6.0
 HAZARD_FRAMES = 2  # a very close obstacle must be seen in this many frames in a row
 CLIPS_KEPT = 200
-AUTO_NAV = os.environ.get("AUTO_NAV", "1") != "0"  # guide to the entrance without being asked
+AUTO_NAV = os.environ.get("AUTO_NAV", "0") == "1"  # off: the app starts on a blank map; guidance starts from a dropped pin
 IMU_LIVE_S = 1.0  # a phone IMU sample this recent: the compass comes from that stream, not from frames
 COMPASS_BUF_MS = 3000  # phone compass history kept, to move a frame's visual fix to the present
 COMPASS_MATCH_MS = 500  # a buffered compass reading this close to a frame's capture time is used
@@ -123,13 +123,15 @@ Using the tools (silently, then just talk)
   the entrance runs on its own from the start; if they said stop and later want to go, use
   start_navigation.
 - "Stop" / "never mind": stop_navigation. "How far?": get_route_status or the context.
+- The destination is the entrance unless they dropped a pin on the map (the CONTEXT goal then says
+  "your pin"); guide to whatever the goal is. "Take me to my pin" is start_navigation with 'pin'.
 - Only say guidance started or stopped if the tool result says ok."""
 
 TOOLS = [
     ("get_location", "Where the user is: decided place, confidence, tracked position.", {}),
     ("get_surroundings", "Objects in the current camera frame and ones seen in the last minute.", {}),
     ("start_navigation", "Start spoken turn-by-turn guidance to a destination.",
-     {"destination": ("STRING", "Destination; only 'entrance' is supported.")}),
+     {"destination": ("STRING", "'entrance', or 'pin' for the spot dropped on the phone's map.")}),
     ("stop_navigation", "Stop the spoken guidance.", {}),
     ("get_route_status", "Progress of the current guidance: next point, meters left.", {}),
     ("get_direction", "Which way to go right now: the turn to make from the way the person faces and how far to "
@@ -412,10 +414,10 @@ class AgentState:
                 instruction = self.guide.update(now, d.place, d.state, self._guidance_yaw(now), self.position,
                                                 est.get("heading_deg"), fresh=False)
             xy, _ = start_point(self.map, d.place, self.position) if d.place in self.map.points else (None, None)
-            goal = self.map.points.get(self.map.goal)
+            goal = self.map.goal_xy  # the destination point: the entrance, or a dropped pin
             if self.guide.status.get("arrived") and xy is not None and goal is not None and math.dist(xy, goal) <= ARRIVE_M:
                 return {"ok": True, "at_destination": True, "navigation_ready": False,
-                        "instruction": "You're at the entrance."}
+                        "instruction": f"You're at {self.map.goal_label}."}
             if self.guide.status.get("arrived"):
                 self.guide.status = {"active": self.guide.active}
             guided = self.guide.active and self.guide.route is not None
@@ -489,7 +491,7 @@ class AgentState:
             route = route_sentence(describe_route(self.map, d.place, self._guidance_yaw(self.t + time.monotonic() - self._received_at), self.position, self.heading.estimate.get("heading_deg"), stride=self.guide.stride))
         if not direction.get("navigation_ready"):
             route = direction["instruction"]
-        return f"CONTEXT: Current instruction: {direction['instruction']} Path to the entrance from here: {route}. In view now: {now}. Seen in the last minute: {recent or 'nothing'}. Place: {place}. Facing direction: {facing}. Goal: {goal}."
+        return f"CONTEXT: Current instruction: {direction['instruction']} Path to {self.map.goal_label} from here: {route}. In view now: {now}. Seen in the last minute: {recent or 'nothing'}. Place: {place}. Facing direction: {facing}. Goal: {goal}."
 
     def snapshot(self) -> dict:
         with self.lock:
@@ -508,10 +510,40 @@ class AgentState:
         route, guiding = self.guide.route, self.guide.route is not None
         if route is None and self.decision.place in self.map.points:
             route = plan(self.map, *start_point(self.map, self.decision.place, self.position))
-        goal = self.map.points.get(self.map.goal)
+        goal, dest = self.map.goal_xy, self.map.destination()
+        ent = self.map.points.get(self.map.entrance)
         return {"pts": [[round(x, 2), round(y, 2)] for x, y in route.pts] if route else None,
                 "guiding": guiding, "length_m": round(route.length, 1) if route else None,
-                "goal": [round(goal[0], 2), round(goal[1], 2)] if goal else None}
+                "goal": [round(goal[0], 2), round(goal[1], 2)] if goal else None,
+                "goal_label": dest["label"], "goal_kind": dest["kind"],
+                "entrance": [round(ent[0], 2), round(ent[1], 2)] if ent else None}
+
+    # -- destination (dropped pin) ---------------------------------------------
+    def preview_destination(self, x: float, y: float) -> dict:
+        """Where a pin at (x, y) would land and the route to it, without changing anything."""
+        import copy
+        with self.lock:
+            m = copy.copy(self.map)  # shares points, walls and graph; only the goal fields differ
+            out = m.set_destination((x, y))
+            if not out.get("ok"):
+                return out
+            d = self.window.decide(self.t + time.monotonic() - self._received_at)
+            route = plan(m, *start_point(m, d.place, self.position)) if d.place in m.points else None
+        out.update(length_m=round(route.length, 1) if route else None,
+                   pts=[[round(a, 2), round(b, 2)] for a, b in route.pts] if route else None)
+        return out
+
+    def set_destination(self, x: float | None = None, y: float | None = None, label: str = "your pin") -> dict:
+        """Guide to a pin at (x, y), or back to the entrance when x is None. Starts guidance now."""
+        with self.lock:
+            out = self.map.clear_destination() if x is None else self.map.set_destination((x, y), label)
+            if not out.get("ok"):
+                return out
+            self.decision = self.window.decide(self.t + time.monotonic() - self._received_at)
+            started = self.guide.replan(self.decision.place, self.position)
+            self._last_nav = None
+            route = self.guide.route
+            return {**out, "active": self.guide.active, "length_m": round(route.length, 1) if route else None}
 
     # -- tools -----------------------------------------------------------------
     def tool(self, name: str, args: dict, describe=None) -> dict:
@@ -537,9 +569,15 @@ class AgentState:
                 return result
             if name == "start_navigation":
                 dest = str(args.get("destination") or "entrance").strip().lower()
-                if dest not in {"entrance", "the entrance", "main entrance", "front entrance",
-                                "door", "the door", "front door", "exit", "the exit", "out", "outside"}:
-                    return {"ok": False, "reason": "only the entrance is supported"}
+                if "pin" in dest or "marked" in dest:
+                    if self.map.goal_kind != "pin":
+                        return {"ok": False, "reason": "no pin is dropped; they can drop one on the phone's map"}
+                else:
+                    if dest not in {"entrance", "the entrance", "main entrance", "front entrance",
+                                    "door", "the door", "front door", "exit", "the exit", "out", "outside"}:
+                        return {"ok": False, "reason": "only the entrance or the dropped pin are supported"}
+                    if self.map.goal_kind != "entrance":
+                        self.map.clear_destination()
                 result = self.guide.start(d.place, self.position if d.place else None)
                 if not result.get("ok"):
                     return result
@@ -875,8 +913,34 @@ def agent_router(get_agent) -> APIRouter:
                 out = state.guide.stop()
             else:
                 # Same as the start_navigation tool: plan from the place decided right now.
-                out = state.tool("start_navigation", {"destination": "entrance"})
+                # Resume toward the current destination (a dropped pin stays the destination).
+                out = state.tool("start_navigation", {"destination": "pin" if state.map.goal_kind == "pin" else "entrance"})
             return {**out, "active": state.guide.active}
+
+    @router.get("/destination")
+    async def destination_preview(x: float, y: float):
+        """Preview a pin: where it lands (moved if unreachable) and the route length, no change."""
+        return need().state.preview_destination(x, y)
+
+    @router.post("/destination")
+    async def destination_set(request: Request):
+        """Body {"x": .., "y": .., "label"?: ..} drops a pin and guides there; {"entrance": true}
+        goes back to the entrance."""
+        try:
+            body = await request.json()
+        except ValueError as ex:
+            raise HTTPException(422, "JSON body required") from ex
+        state = need().state
+        if body.get("entrance"):
+            return state.set_destination(None)
+        try:
+            x, y = float(body["x"]), float(body["y"])
+        except (KeyError, TypeError, ValueError) as ex:
+            raise HTTPException(422, "x and y (metres, map frame) required") from ex
+        if not (math.isfinite(x) and math.isfinite(y)):
+            raise HTTPException(422, "x and y must be finite")
+        label = str(body.get("label") or "your pin")[:40]
+        return state.set_destination(x, y, label)
 
     @router.get("/clip/{clip_id}")
     async def clip(clip_id: str, request: Request):
