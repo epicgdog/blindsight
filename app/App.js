@@ -341,7 +341,7 @@ function LegacyApp() {
   // Floor map (walls, scan points) once per server, as soon as the socket is up.
   useEffect(() => { setMapData(null); }, [address]);
   useEffect(() => {
-    if (!status.connected || mapData) return;
+    if (mapData) return; // HTTP only: no need to wait for the camera stream
     const url = panoUrl(normalizeServerUrl(addressRef.current));
     if (!url) return;
     let cancelled = false;
@@ -354,7 +354,7 @@ function LegacyApp() {
   // Venue plans and rooms, once per server.
   useEffect(() => { setVenueData(null); }, [address]);
   useEffect(() => {
-    if (!status.connected || venueData) return;
+    if (venueData) return; // HTTP only: the search bar works before Navigate starts the camera
     const url = venueInfoUrl(normalizeServerUrl(addressRef.current));
     if (!url) return;
     let cancelled = false;
@@ -405,9 +405,13 @@ function LegacyApp() {
       logApp("route preview failed", { error: e?.message });
     }
   }, []);
+  const starting = useRef(false);
   const openCamera = useCallback(() => {
     setScreen("nav");
-    if (!runningRef.current) start().catch((e) => logApp("start failed", { error: e?.message }));
+    if (!normalizeServerUrl(addressRef.current)) { setDebugOpen(true); return; } // no server address set yet
+    if (runningRef.current || starting.current) return;
+    starting.current = true; // camera stream, socket and sensors start here, no Start button needed
+    start().catch((e) => logApp("start failed", { error: e?.message })).finally(() => { starting.current = false; });
   }, [start]);
   const navigate = useCallback(async () => {
     const room = confirm?.room;
@@ -554,7 +558,7 @@ function LegacyApp() {
       endIsDest: r.legs.length === 1 };
   }, []);
   const vb = venueBanner(vRoute);
-  const b = !running ? { title: "Not started", meters: "", arrow: null, tone: "off" }
+  const b = !running ? { title: "Where do you want to go?", meters: "", arrow: null, tone: "off" }
     : vb && status.connected ? vb : banner({ connected: status.connected, nav, position });
   const bar = vRoute?.ok ? { time: `${Math.max(1, Math.round(vRoute.total_m / 60))} min`, left: `${distanceText(vRoute.total_m)} left` }
     : bottomBar(nav);
@@ -576,6 +580,15 @@ function LegacyApp() {
         <View style={[StyleSheet.absoluteFill, s.camBack]}>
           <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" pictureSize={PICTURE_SIZE} />
           <ArOverlay width={winW} height={winH} getPose={getArPose} cam={arCam} />
+          {(result?.detections ?? []).map((d, i) => {
+            const fw = Math.max(winW, winH * 0.75), off = (winW - fw) / 2, [x1, y1, x2, y2] = d.bbox;
+            return (
+              <View key={i} style={[s.det, s.detBig, { left: off + x1 * fw, top: y1 * winH, width: (x2 - x1) * fw, height: (y2 - y1) * winH }]}
+                pointerEvents="none">
+                <Text style={s.detBigText}>{d.cls} {Math.round(d.conf * 100)}%</Text>
+              </View>
+            );
+          })}
         </View>
       ) : venueData ? (
         <VenueMap lv={lv} uri={imageUrl(normalizeServerUrl(address), lv?.image_url)} route={vRoute} dest={vDest}
@@ -748,7 +761,7 @@ function LegacyApp() {
           {bar.time ? (
             <Text style={s.barLine}><Text style={s.barTime}>{bar.time}</Text><Text style={s.barLeft}>{"  ·  "}{bar.left}</Text></Text>
           ) : (
-            <Text style={s.barIdle}>{nav?.arrived ? "Arrived" : !running ? "Not started" : !status.connected ? "Offline" : navActive ? "Finding the route…" : "No destination"}</Text>
+            <Text style={s.barIdle}>{nav?.arrived ? "Arrived" : !running ? "Search a room, then Navigate" : !status.connected ? "Offline" : navActive ? "Finding the route…" : "No destination"}</Text>
           )}
           {result?.agent?.place_label && decision?.state !== "unknown" ? <Text style={s.barPlace} numberOfLines={1}>{result.agent.place_label}</Text> : null}
         </View>
@@ -947,6 +960,9 @@ const s = StyleSheet.create({
   preview: { width: 96, height: 128, borderRadius: 8, overflow: "hidden", backgroundColor: "#000" },
   det: { position: "absolute", borderWidth: 1.5, borderColor: "#fbbc04" },
   detText: { color: "#fbbc04", fontSize: 8, fontWeight: "700" },
+  detBig: { borderWidth: 3, borderRadius: 6 },
+  detBigText: { color: "#202124", backgroundColor: "#fbbc04", fontSize: 13, fontWeight: "800", alignSelf: "flex-start",
+    paddingHorizontal: 5, paddingVertical: 1 },
   controls: { flex: 1, gap: 8 },
   input: { backgroundColor: "#303134", color: "#fff", padding: 10, borderRadius: 8, fontSize: 15 },
   sheetBody: { flex: 1, marginTop: 8 },
