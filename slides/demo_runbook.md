@@ -12,7 +12,7 @@ Everything needed to present Blindsight: the deck, the live demo, and what to do
 
 ## The day before
 
-1. **Deck.** The committed deck is slides/blindsight.pptx (8 slides, speaker notes on every slide). For the presenting copy with real images, put these files in place first (they stay out of git):
+1. **Deck.** The committed deck is slides/blindsight.pptx (13 slides, speaker notes on every slide; slides 8 and 12 are for questions and track judges). For the presenting copy with real images, put these files in place first (they stay out of git):
    - data/rabinowitz_combined.png (3D model and 360 photo)
    - data/vexcel/vexcel_rabinowitz.jpg (aerial image)
    - data/reports/viewer.png (a screenshot of the viewer during a rehearsal, Cmd+Shift+4)
@@ -39,7 +39,7 @@ Everything needed to present Blindsight: the deck, the live demo, and what to do
 3. **Viewer.** Open http://localhost:8000 on the laptop, full screen, next to the deck.
 4. **Phone.** Portrait, 1x, volume up. The app plays through the silent switch.
 
-## During the demo (slide 4)
+## During the demo (slide 6)
 
 1. Location cue at the first place, such as "View matches the front door."
 2. Turn toward people or a bench: a clock-direction cue.
@@ -51,6 +51,22 @@ Everything needed to present Blindsight: the deck, the live demo, and what to do
 - **Phone will not connect:** check that the tunnel window is still running, then retype the address. Do not debug on stage.
 - **No location cue:** keep talking over the object cues. Open http://localhost:8000/api/localization later to see why.
 - **Anything else:** play slides/backup.mp4 without apologizing. It is labelled simulated; say so.
+
+## Track judges
+
+The pitch script ends with one optional line per track. Show slide 12 (Built for our tracks) when a track's judges ask what fits their track.
+
+| Track | Judged on (from the F26 track documents) |
+|---|---|
+| Best Healthcare Hack (main) | Improves healthcare delivery, promotes wellness or tackles a public health challenge. Best Overall rubric: creativity, utility, charity, avidity |
+| CoStar, Inside and Out | 30% use of the data (combine at least two of CoStar data, Matterport, Vexcel), 30% agentic depth, 25% usefulness, 15% demo and polish |
+| Peri, Forward Deployed Challenge | A real business consulted this weekend: real-world need, usability (could they adopt it now), execution. The submission must name the business, the person and their role, and include one piece of evidence |
+| Amazon, Best Practical AI Innovation | 25% each: creativity, usefulness, technical implementation, user experience. Must include a working prototype, a clear use case and target user, basic documentation and a pitch |
+| MLH, Best Use of Gemini API | Push what is possible with the Gemini API (no rubric published in MLH's email) |
+
+The Peri row on slide 12 appears once PERI in slides/build_deck.py is filled in with the real business, person, role, need and evidence.
+
+On Devpost, enter Best Healthcare Hack as the required track and opt in to all four others: CoStar (Inside and Out), Amazon (Best Practical AI Innovation), Peri (Forward Deployed Challenge, with its required evidence) and MLH Best Use of Gemini API.
 
 ## Honesty rules (from the team's plan)
 
