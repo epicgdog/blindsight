@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 UV ?= uv
 CORE_FILES := server/__init__.py server/config.py server/protocol.py server/server.py \
+ server/tests/test_full_simulation.py \
  server/spatial.py server/tests/test_spatial.py \
  server/disambiguation.py server/tests/test_disambiguation.py \
  server/property_localize.py server/tests/test_property_localize.py \
@@ -28,6 +29,12 @@ check:
 	$(UV) run ruff check $(CORE_FILES)
 	$(UV) run ruff format --check $(CORE_FILES)
 	$(UV) run pytest
+	node --test app/test/unit/*.test.js server/viewer/test/*.test.js
+
+.PHONY: simulation
+simulation:
+	$(UV) run pytest server/tests/test_full_simulation.py server/tests/test_property_localize.py server/tests/test_disambiguation.py server/tests/test_spatial.py -q
+	node --test app/test/unit/*.test.js server/viewer/test/*.test.js
 
 download-models:
 	$(UV) run python -m server.detect --download

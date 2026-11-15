@@ -249,7 +249,9 @@ class CueEngine:
         ranked = sorted(totals.items(), key=lambda item: (-item[1][1], item[0]))[:MAX_GROUP]
         return [counted(cls, count) for cls, (count, _) in ranked], {c for c, _ in ranked}
 
-    def update(self, detections, location: Location, now_s: float, nav_text: str | None = None) -> Cue | None:
+    def update(
+        self, detections, location: Location, now_s: float, nav_text: str | None = None
+    ) -> Cue | None:
         """nav_text: a new guidance instruction (server.entrance_nav); spoken after hazards,
         before the location announcement. A newer instruction replaces an unspoken one."""
         if nav_text:

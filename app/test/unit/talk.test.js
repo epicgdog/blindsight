@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { MIN_CLIP_MS, RECORD_MODE, agentTalkUrl, postClip, createHoldToTalk } from "../../src/talk.js";
+import { normalizeServerUrl } from "../../src/address.js";
+
+test("bare Tailscale address uses HTTPS for voice upload", () => {
+  assert.equal(agentTalkUrl(normalizeServerUrl("minky.tailb9ac0d.ts.net")), "https://minky.tailb9ac0d.ts.net/api/agent/talk");
+  assert.equal(normalizeServerUrl("192.168.1.5:8000"), "ws://192.168.1.5:8000/ws/phone");
+});
 
 test("agent url follows the websocket scheme and host", () => {
   assert.equal(agentTalkUrl("wss://box.ts.net/ws/phone"), "https://box.ts.net/api/agent/talk");

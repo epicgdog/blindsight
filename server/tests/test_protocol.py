@@ -112,7 +112,9 @@ def test_attitude_out_of_range_is_rejected(pitch, roll):
 def test_header_moving_flag_round_trips_and_defaults_to_none():
     jpeg = b"\xff\xd8" + b"0" * 10
     for moving in (True, False, None):
-        out = decode_frame(encode_frame(FrameHeader(1, 5.0, None, 10, 20, moving=moving), jpeg)).header
+        out = decode_frame(
+            encode_frame(FrameHeader(1, 5.0, None, 10, 20, moving=moving), jpeg)
+        ).header
         assert out.moving is moving
     raw = json.dumps({"seq": 1, "ts_ms": 1, "heading_deg": None, "w": 4, "h": 4}).encode()
     assert decode_frame(struct.pack(">I", len(raw)) + raw + b"\xff\xd8xx").header.moving is None

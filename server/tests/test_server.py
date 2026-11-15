@@ -30,6 +30,7 @@ class VerifiedLocalizer:
 def test_http_and_websocket_contract(settings, packet):
     with TestClient(create_app(settings)) as client:
         assert client.get("/healthz").json()["status"] == "ok"
+        assert client.get("/healthz").json()["voice_agent_api_version"] == 2
         assert client.get("/").status_code == 200
         assert client.post("/api/capture/pos").status_code == 409
         with client.websocket_connect("/ws/viewer") as viewer:
