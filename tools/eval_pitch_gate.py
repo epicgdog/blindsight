@@ -37,9 +37,9 @@ def run(L: Localizer, root: Path, seqs: list[dict], pitch_noise: float | None, s
     if not getattr(L, "_eval_wrapped", False):
         orig = L._hold_place
 
-        def hold(matched, best):
+        def hold(matched, best, **kw):
             L._eval_best = best
-            return orig(matched, best)
+            return orig(matched, best, **kw)
 
         L._hold_place, L._eval_wrapped = hold, True
     rows = []
