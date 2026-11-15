@@ -231,7 +231,7 @@ class AgentState:
         self.map = EntranceMap.load(self.data_dir, entrance)
         self.guide = EntranceGuide(self.map)
         try:
-            self.venue: Venue | None = Venue.load()
+            self.venue: Venue | None = Venue.shared()
         except (OSError, ValueError, KeyError):
             log.warning("venue data unavailable", exc_info=True)
             self.venue = None

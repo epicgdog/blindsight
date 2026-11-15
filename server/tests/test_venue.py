@@ -194,3 +194,35 @@ def test_agent_one_destination_at_a_time(state):
     assert state.guide.active is False
     state.tool("stop_navigation", {})
     assert state.venue_dest is None
+
+
+# -- places marked on site -------------------------------------------------------
+
+def test_mark_water_mid_corridor_routes_there_directly(tmp_path):
+    v = Venue.load(marked_path=tmp_path / "marked.json")
+    place = v.mark("water", Start("1", (450, 360)))
+    r = v.route(place["id"], CHECK_IN)
+    assert r["ok"] and r["total_m"] < 25  # not via the far corner of the corridor
+    assert r["steps"][-1] == "The water fountain is on your right."
+    assert [x["id"] for x in v.search("water", CHECK_IN)] == [place["id"]]
+
+
+def test_marked_places_survive_a_reload_and_can_be_removed(tmp_path):
+    path = tmp_path / "marked.json"
+    v = Venue.load(marked_path=path)
+    rid = v.mark("restroom", Start("A", (345, 520)))["id"]
+    v2 = Venue.load(marked_path=path)
+    assert rid in v2.rooms and v2.route(rid, CHECK_IN)["ok"]
+    assert v2.route("A98", CHECK_IN)["total_m"] == Venue.load(marked_path=None).route("A98", CHECK_IN)["total_m"]
+    assert v2.unmark(rid) and not v2.unmark("A97")
+    assert rid not in Venue.load(marked_path=path).rooms
+
+
+def test_mark_rejects_unknown_kinds(tmp_path):
+    with pytest.raises(ValueError):
+        Venue.load(marked_path=tmp_path / "m.json").mark("pizza", CHECK_IN)
+
+
+def test_mark_api_needs_a_known_position(settings):
+    with TestClient(create_app(settings)) as client:
+        assert client.post("/api/venue/mark", json={"kind": "water"}).status_code == 409

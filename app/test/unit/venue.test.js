@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   distanceText, fitBox, imageUrl, mapToPx, pxToMap, shownLevel, stepArrow, touchToPx, transferMarks, venueBanner,
-  venueDestUrl, venueInfoUrl, venueRouteUrl, venueSearchUrl,
+  venueDestUrl, venueInfoUrl, venueMarkUrl, venueRouteUrl, venueSearchUrl,
 } from "../../src/venue.js";
 
 const WS = "wss://example.ts.net/ws/phone";
@@ -13,6 +13,7 @@ test("venue URLs come from the websocket address", () => {
   assert.equal(venueSearchUrl(WS, "judges room"), "https://example.ts.net/api/venue/search?q=judges%20room");
   assert.equal(venueRouteUrl(WS, "A98"), "https://example.ts.net/api/venue/route?to=A98");
   assert.equal(venueDestUrl(WS), "https://example.ts.net/api/agent/venue");
+  assert.equal(venueMarkUrl(WS), "https://example.ts.net/api/venue/mark");
   assert.equal(imageUrl(WS, "/venue/level_1.png"), "https://example.ts.net/venue/level_1.png");
   assert.equal(venueSearchUrl(WS, ""), null);
   assert.equal(venueInfoUrl(""), null);

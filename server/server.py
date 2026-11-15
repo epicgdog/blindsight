@@ -552,7 +552,7 @@ def create_app(
     app.include_router(spatial_router(settings.data_dir))
 
     # HackPrinceton venue: room search and routes across levels (server/venue.py).
-    venue = Venue.load()
+    venue = Venue.shared()
     app.state.venue = venue
 
     def venue_start():

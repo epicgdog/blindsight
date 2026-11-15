@@ -29,7 +29,7 @@ import { RECORD_MODE, agentQuietUrl, agentTalkUrl, postClip, createHoldToTalk } 
 import NativeNavigation, { trackingModule } from "./NativeNavigation";
 import FlatMap from "./src/FlatMap";
 import VenueMap from "./src/VenueMap";
-import { distanceText, imageUrl, shownLevel, venueBanner, venueDestUrl, venueInfoUrl, venueRouteUrl,
+import { distanceText, imageUrl, shownLevel, venueBanner, venueDestUrl, venueInfoUrl, venueMarkUrl, venueRouteUrl,
   venueSearchUrl } from "./src/venue";
 import { BugIcon, CompassIcon, MicIcon, SpeakerIcon, TurnIcon } from "./src/Icons";
 import { accuracyText, banner, bottomBar, boxStyle, frameMatch, framePosition, headingText, mapMode, metricsUrl,
@@ -81,6 +81,7 @@ function LegacyApp() {
   const [localRoute, setLocalRoute] = useState(null); // route fetched on selection, until frames carry it
   const [levelPick, setLevelPick] = useState(null); // level chosen with the tabs; null follows you
   const [stepsOpen, setStepsOpen] = useState(false);
+  const [markNote, setMarkNote] = useState(""); // result of the last "Mark here"
 
   useEffect(() => {
     (async () => {
@@ -382,6 +383,19 @@ function LegacyApp() {
         body: JSON.stringify({ to: room.id }) });
     } catch (e) { logApp("venue destination failed", { error: e?.message }); }
   }, []);
+  // "Mark here": a restroom or water fountain where you stand (needs a position fix).
+  const markHere = useCallback(async (kind) => {
+    const url = venueMarkUrl(normalizeServerUrl(addressRef.current));
+    if (!url) return;
+    setMarkNote("Marking…");
+    try {
+      const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind }) });
+      const body = await r.json().catch(() => ({}));
+      setMarkNote(r.ok ? `Marked ${body.place?.name ?? kind} on ${body.place?.level_name ?? "this level"}` : body.detail ?? `Failed (${r.status})`);
+      logApp("mark", { kind, status: r.status, place: body.place?.id });
+    } catch (e) { setMarkNote(`Failed: ${e?.message}`); }
+  }, []);
+
   const endRoom = useCallback(async () => {
     setLocalRoute(null); setLevelPick(null); setStepsOpen(false);
     const url = venueDestUrl(normalizeServerUrl(addressRef.current));
@@ -685,6 +699,16 @@ function LegacyApp() {
             <Text style={s.dbg}>Debug dots (scan points, matched place, candidates)</Text>
             <Switch value={debugDots} onValueChange={setDebugDots} />
           </View>
+          <Text style={s.h}>Mark here</Text>
+          <View style={s.markRow}>
+            <Pressable style={s.markBtn} onPress={() => markHere("restroom")} accessibilityRole="button" accessibilityLabel="Mark a restroom where I stand">
+              <Text style={s.markText}>Restroom</Text>
+            </Pressable>
+            <Pressable style={s.markBtn} onPress={() => markHere("water")} accessibilityRole="button" accessibilityLabel="Mark a water fountain where I stand">
+              <Text style={s.markText}>Water fountain</Text>
+            </Pressable>
+          </View>
+          {markNote ? <Text style={s.dbgSmall}>{markNote}</Text> : null}
           <Text style={s.h}>Connection</Text>
           <Text style={s.dbg}>server {num(result?.server_ms?.total)} ms · p50 {num(metrics?.p50_ms)} / p95 {num(metrics?.p95_ms)} ms · {status.state ?? "–"}</Text>
           <Text style={s.h}>Localizer</Text>
@@ -766,6 +790,9 @@ const s = StyleSheet.create({
   levelDotOn: { backgroundColor: "#fff" },
   levelYou: { color: "#1a73e8", fontSize: 10, fontWeight: "700" },
   steps: { maxHeight: 220, marginTop: 6 },
+  markRow: { flexDirection: "row", gap: 10, marginTop: 6 },
+  markBtn: { flex: 1, backgroundColor: "#303134", borderRadius: 10, paddingVertical: 10, alignItems: "center" },
+  markText: { color: "#8ab4f8", fontSize: 15, fontWeight: "700" },
   step: { color: "#202124", fontSize: 15, paddingVertical: 3 },
   pinChip: { position: "absolute", left: 12, bottom: BOTTOM + BAR_H + 60, backgroundColor: "#fff", borderRadius: 18,
     paddingVertical: 8, paddingHorizontal: 14, ...shadow },

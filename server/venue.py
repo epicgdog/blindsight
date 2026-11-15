@@ -26,6 +26,12 @@ from fastapi import APIRouter, HTTPException
 from fastapi.staticfiles import StaticFiles
 
 DIR = Path(__file__).resolve().parent / "venue"
+MARKED = Path(__file__).resolve().parents[1] / "data" / "venue" / "marked.json"  # places marked on site
+MARK_KINDS = {
+    "restroom": ("Restroom", ["bathroom", "toilet", "restroom", "washroom", "mens room", "womens room"]),
+    "water": ("Water fountain", ["water", "water fountain", "drinking fountain", "fountain", "bottle filler",
+                                 "refill", "drink"]),
+}
 STAIRS_M = 8.0  # walking cost of one flight of stairs
 STAIRS_PENALTY_M = 40.0  # the elevator is taken unless it adds more than this (blind user)
 ELEVATOR_M = 15.0  # waiting and riding, per level
@@ -107,7 +113,7 @@ def _norm(text: str) -> str:
 
 
 class Venue:
-    def __init__(self, data: dict, align: dict):
+    def __init__(self, data: dict, align: dict, marked_path: Path | None = None):
         self.levels = {lv["id"]: lv for lv in data["levels"]}
         self.rooms = {r["id"]: r for r in data["rooms"]}
         self.align = align
@@ -126,10 +132,94 @@ class Venue:
                     continue
                 cost = ELEVATOR_M if link["kind"] == "elevator" else STAIRS_M + STAIRS_PENALTY_M
                 self._edge((lo, link["nodes"][lo]), (hi, link["nodes"][hi]), cost, link)
+        self.marked_path = marked_path
+        if marked_path is not None and marked_path.exists():
+            try:
+                for r in json.loads(marked_path.read_text()):
+                    if r.get("level") in self.nodes and r.get("door"):
+                        r["join"] = self._attach(r["level"], tuple(r["door"]), r["id"])
+                        self.rooms[r["id"]] = r
+            except (OSError, ValueError, KeyError):
+                pass
 
     @classmethod
-    def load(cls, directory: Path = DIR) -> "Venue":
-        return cls(json.loads((directory / "venue.json").read_text()), json.loads((directory / "align.json").read_text()))
+    def load(cls, directory: Path = DIR, marked_path: Path | None = MARKED) -> "Venue":
+        return cls(json.loads((directory / "venue.json").read_text()), json.loads((directory / "align.json").read_text()),
+                   marked_path)
+
+    _shared: "Venue | None" = None
+
+    @classmethod
+    def shared(cls) -> "Venue":
+        """One instance for the API and the voice agent, so a place marked from the phone is
+        found by voice at once."""
+        if cls._shared is None:
+            cls._shared = cls.load()
+        return cls._shared
+
+    # -- places marked on site ("Mark here") -------------------------------------
+    def mark(self, kind: str, start: Start, name: str | None = None) -> dict:
+        """Add a restroom or water fountain where the person stands; saved for later sessions."""
+        if kind not in MARK_KINDS:
+            raise ValueError(f"kind must be one of {sorted(MARK_KINDS)}")
+        title, aliases = MARK_KINDS[kind]
+        n = 1 + sum(1 for k in self.rooms if k.startswith(f"m-{kind}-"))
+        rid = f"m-{kind}-{n}"
+        while rid in self.rooms:
+            n += 1
+            rid = f"m-{kind}-{n}"
+        px = (round(float(start.px[0]), 1), round(float(start.px[1]), 1))
+        join = self._attach(start.level, px, rid)
+        title = (name or title)[:60]
+        room = {"id": rid, "level": start.level, "building": "", "label": px, "door": px, "join": join,
+                "name": title, "spoken": f"the {title.lower()}", "roles": [kind], "aliases": aliases,
+                "marked": True, "kind": kind, "note": "Marked on site with the phone."}
+        self.rooms[rid] = room
+        self._save_marked()
+        return self.room_info(rid)
+
+    def unmark(self, rid: str) -> bool:
+        if not self.rooms.get(rid, {}).get("marked"):
+            return False
+        del self.rooms[rid]
+        self._save_marked()
+        return True
+
+    def _save_marked(self) -> None:
+        if self.marked_path is None:
+            return
+        self.marked_path.parent.mkdir(parents=True, exist_ok=True)
+        rows = [r for r in self.rooms.values() if r.get("marked")]
+        self.marked_path.write_text(json.dumps(rows, indent=1))
+
+    def _attach(self, level: str, px: tuple[float, float], name: str) -> str:
+        """Join a point to the walk graph: split the nearest corridor segment of the level at the
+        point's projection, so a place mid-corridor is reached there, not via a far corner."""
+        best = None
+        for a, nbrs in self.graph.items():
+            if a[0] != level:
+                continue
+            for b, _, link in nbrs:
+                if link is not None or b[0] != level or b <= a:
+                    continue
+                pa, pb = self.nodes[level][a[1]], self.nodes[level][b[1]]
+                dx, dy = pb[0] - pa[0], pb[1] - pa[1]
+                L2 = dx * dx + dy * dy
+                t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((px[0] - pa[0]) * dx + (px[1] - pa[1]) * dy) / L2))
+                q = (pa[0] + t * dx, pa[1] + t * dy)
+                d = math.dist(q, px)
+                if best is None or d < best[0]:
+                    best = (d, a, b, q)
+        if best is None:
+            return self.nearest_node(Start(level, px))[1]
+        node = f"@{name}"
+        _, a, b, q = best
+        self.nodes[level][node] = (round(q[0], 1), round(q[1], 1))
+        self.graph[a] = [e for e in self.graph[a] if e[0] != b]
+        self.graph[b] = [e for e in self.graph[b] if e[0] != a]
+        self._edge(a, (level, node), self.px_dist(level, self.nodes[level][a[1]], q), None)
+        self._edge((level, node), b, self.px_dist(level, q, self.nodes[level][b[1]]), None)
+        return node
 
     def _edge(self, a, b, w, link):
         self.graph.setdefault(a, []).append((b, w, link))
@@ -231,6 +321,8 @@ class Venue:
             out["note"] = r["note"]
         if r.get("approximate"):
             out["approximate"] = True
+        if r.get("marked"):
+            out["marked"] = True
         return out
 
     # -- routing ---------------------------------------------------------------
@@ -346,7 +438,8 @@ class Venue:
         elif side == "ahead":
             out.append(f"{name} is straight ahead.")
         elif side:
-            out.append(f"{name} is the door on your {side}.")
+            thing = "" if self.rooms.get(room["id"], {}).get("kind") == "water" else "the door "
+            out.append(f"{name} is {thing}on your {side}.")
         else:
             out.append(f"You have reached {name}.")
         return out
@@ -459,6 +552,23 @@ def venue_router(get_venue, get_start=None) -> APIRouter:
             start = start_from(None, None, None, "117")
         return {"query": q, "start": {"level": start.level, "px": list(start.px)}, "start_assumed": assumed,
                 "results": get_venue().search(q, start)}
+
+    @router.post("/api/venue/mark")
+    async def venue_mark(body: dict):
+        """{"kind": "restroom" | "water", "name"?: str}: mark it where the person stands now."""
+        start = get_start() if get_start else None
+        if start is None:
+            raise HTTPException(409, "Position unknown: hold the phone up until the map shows you, then mark")
+        try:
+            return {"ok": True, "place": get_venue().mark(str(body.get("kind")), start, body.get("name"))}
+        except ValueError as ex:
+            raise HTTPException(422, str(ex)) from ex
+
+    @router.delete("/api/venue/mark/{rid}")
+    async def venue_unmark(rid: str):
+        if not get_venue().unmark(rid):
+            raise HTTPException(404, "No marked place with that id")
+        return {"ok": True}
 
     @router.get("/api/venue/route")
     async def venue_route(to: str, level: str | None = None, u: float | None = None, v: float | None = None,

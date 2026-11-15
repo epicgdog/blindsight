@@ -12,6 +12,7 @@ export const venueRouteUrl = (wsUrl, to) => {
   return b && to ? `${b}/api/venue/route?to=${encodeURIComponent(to)}` : null;
 };
 export const venueDestUrl = (wsUrl) => { const b = serverBase(wsUrl); return b ? `${b}/api/agent/venue` : null; };
+export const venueMarkUrl = (wsUrl) => { const b = serverBase(wsUrl); return b ? `${b}/api/venue/mark` : null; };
 export const imageUrl = (wsUrl, path) => { const b = serverBase(wsUrl); return b && path ? `${b}${path}` : null; };
 
 // Level on screen: the one picked by hand, else where the person is, else where the route
