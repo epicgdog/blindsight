@@ -72,3 +72,26 @@ test("sendFrame only sends when open and returns false otherwise", async () => {
   FakeWS.instances[0].open();
   assert.equal(await client.sendFrame(new Uint8Array([1])), true);
 });
+
+test("sendJson sends text on an open socket and reports whether it did", () => {
+  const { client } = setup();
+  assert.equal(client.sendJson({ type: "imu" }), false); // not started yet
+  client.start();
+  const ws = FakeWS.instances[0];
+  assert.equal(client.sendJson({ type: "imu" }), false); // not open yet
+  ws.open();
+  assert.equal(client.sendJson({ type: "imu", steps: 3 }), true);
+  assert.deepEqual(JSON.parse(ws.sent.at(-1)), { type: "imu", steps: 3 });
+  assert.equal(typeof ws.sent.at(-1), "string"); // text, not binary: the server tells them apart
+});
+
+test("sendJson never throws, even when the socket does", () => {
+  const { client } = setup();
+  client.start();
+  const ws = FakeWS.instances[0];
+  ws.open();
+  ws.send = () => { throw new Error("closed"); };
+  assert.equal(client.sendJson({ a: 1 }), false);
+  const cyclic = {}; cyclic.self = cyclic;
+  assert.equal(client.sendJson(cyclic), false);
+});

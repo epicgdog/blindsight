@@ -42,5 +42,15 @@ export function createClient({
       ws.send(bytes);
       return true;
     },
+    // Text JSON (the phone's sensor sample). Never throws; false when the socket is not open.
+    sendJson(obj) {
+      try {
+        if (!ws || ws.readyState !== 1) return false;
+        ws.send(JSON.stringify(obj));
+        return true;
+      } catch {
+        return false;
+      }
+    },
   };
 }

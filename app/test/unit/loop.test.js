@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runCaptureLoop } from "../../src/loop.js";
+import { runCaptureLoop, headingRate, frameIntervalMs, STILL_MS, TURN_FAST_DEG_S } from "../../src/loop.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -92,4 +92,63 @@ test("headers carry moving only when the detector has an answer", async () => {
   });
   assert.equal(headers[0].moving, false);
   assert.ok(!("moving" in headers[1]));
+});
+
+test("headingRate is degrees per second, 0 without a usable previous sample", () => {
+  assert.equal(headingRate(null, 90, 1000), 0);
+  assert.equal(headingRate({ heading: null, t: 0 }, 90, 1000), 0);
+  assert.equal(headingRate({ heading: 10, t: 0 }, null, 1000), 0);
+  assert.equal(headingRate({ heading: 10, t: 1000 }, 50, 1000), 0); // no time passed
+  assert.equal(headingRate({ heading: 10, t: 2000 }, 50, 1000), 0); // clock went backwards
+  assert.equal(headingRate({ heading: 0, t: 0 }, 90, 1000), 90);
+  assert.equal(headingRate({ heading: 90, t: 0 }, 0, 500), 180);
+});
+
+test("headingRate takes the short way round north", () => {
+  assert.equal(headingRate({ heading: 350, t: 0 }, 10, 1000), 20);
+  assert.equal(headingRate({ heading: 10, t: 0 }, 350, 1000), 20);
+});
+
+test("frameIntervalMs slows down only when the phone is known to be still", () => {
+  assert.equal(frameIntervalMs({ moving: false }), STILL_MS);
+  assert.equal(frameIntervalMs({ moving: true }), 0);
+  assert.equal(frameIntervalMs({ moving: undefined }), 0); // unknown motion counts as moving
+  assert.equal(frameIntervalMs({ moving: null }), 0);
+});
+
+test("frameIntervalMs goes full speed when turning fast, even held still", () => {
+  assert.equal(frameIntervalMs({ moving: false, turnDegPerS: TURN_FAST_DEG_S }), 0);
+  assert.equal(frameIntervalMs({ moving: false, turnDegPerS: TURN_FAST_DEG_S - 1 }), STILL_MS);
+});
+
+test("onRate reports the interval once per change, and a still phone sends frames further apart", async () => {
+  const rates = [], stamps = []; let running = true;
+  const atts = [{ moving: true }, { moving: true }, { moving: false }, { moving: false }];
+  await runCaptureLoop({
+    isRunning: () => running,
+    capture: async () => ({ bytes: new Uint8Array([1]), w: 1, h: 1 }),
+    send: async () => { stamps.push(Date.now()); if (stamps.length === 4) running = false; },
+    getHeading: () => 0,
+    getAttitude: () => atts[stamps.length],
+    onRate: (r) => rates.push(r),
+  });
+  assert.deepEqual(rates.map((r) => r.interval_ms), [0, STILL_MS]); // two changes, not four calls
+  assert.equal(rates[0].moving, true);
+  assert.equal(rates[1].moving, false);
+  assert.ok(stamps[3] - stamps[2] >= STILL_MS - 50, "a held-still phone waits between frames");
+  assert.ok(stamps[1] - stamps[0] < STILL_MS / 2, "a moving phone does not");
+});
+
+test("headers carry steps only when it is a non-negative integer", async () => {
+  const headers = []; let running = true;
+  const steps = [12, -1, 3.5, null];
+  await runCaptureLoop({
+    isRunning: () => running,
+    capture: async () => ({ bytes: new Uint8Array([1]), w: 1, h: 1 }),
+    send: async (_b, h) => { headers.push(h); if (headers.length === 4) running = false; },
+    getHeading: () => 0,
+    getSteps: () => steps[headers.length],
+  });
+  assert.equal(headers[0].steps, 12);
+  for (const h of headers.slice(1)) assert.ok(!("steps" in h));
 });

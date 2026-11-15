@@ -73,6 +73,8 @@ class FrameHeader:
     roll_deg: float | None = None
     # Optional: false when the phone's accelerometer says the user is not walking.
     moving: bool | None = None
+    # Optional cumulative step count from the phone's pedometer (since its counter started).
+    steps: int | None = None
 
     def __post_init__(self):
         if type(self.seq) is not int or not 0 <= self.seq <= 2**53 - 1:
@@ -97,12 +99,42 @@ class FrameHeader:
                 raise ProtocolError(f"{name} must be null or within +/-{limit}")
         if self.moving is not None and type(self.moving) is not bool:
             raise ProtocolError("moving must be null or a boolean")
+        if self.steps is not None and (type(self.steps) is not int or not 0 <= self.steps <= 2**53 - 1):
+            raise ProtocolError("steps must be null or a nonnegative integer")
 
 
 @dataclass(frozen=True)
 class FramePacket:
     header: FrameHeader
     jpeg: bytes
+
+
+def parse_imu(text: str) -> dict | None:
+    """A phone sensor sample, {"type": "imu", ...}, sent as text about 10 times a second between frames.
+    Loose on purpose: a bad or missing field becomes None and the rest of the sample is kept. None when
+    the text is not an imu message at all."""
+    try:
+        value = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(value, dict) or value.get("type") != "imu":
+        return None
+
+    def number(key: str, lo: float, hi: float) -> float | None:
+        v = value.get(key)
+        if type(v) not in (int, float) or not math.isfinite(v) or not lo <= v <= hi:
+            return None
+        return float(v)
+
+    heading = number("heading_deg", 0, 360)
+    moving = value.get("moving")
+    steps = value.get("steps")
+    return {
+        "t_ms": number("t_ms", 0, 2**53 - 1),
+        "heading_deg": None if heading is None else heading % 360.0,
+        "moving": moving if type(moving) is bool else None,
+        "steps": steps if type(steps) is int and 0 <= steps <= 2**53 - 1 else None,
+    }
 
 
 def encode_frame(header: FrameHeader, jpeg: bytes) -> bytes:
@@ -127,6 +159,7 @@ def decode_frame(data: bytes, max_bytes: int = MAX_MESSAGE_BYTES) -> FramePacket
             pitch_deg=value.get("pitch_deg"),
             roll_deg=value.get("roll_deg"),
             moving=value.get("moving"),
+            steps=value.get("steps"),
         )
     except (ValueError, TypeError, KeyError, UnicodeDecodeError, RecursionError) as exc:
         raise ProtocolError("Invalid frame header") from exc
