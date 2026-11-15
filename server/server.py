@@ -240,9 +240,6 @@ class Pipeline:
                     moving=hdr.moving,
                     steps=hdr.steps,
                     ts_ms=hdr.ts_ms,
-                    pitch_deg=hdr.pitch_deg,
-                    roll_deg=hdr.roll_deg,
-                    frame_wh=(hdr.w, hdr.h),
                 )
             except Exception:  # guidance must never break the frame pipeline
                 log.exception("Agent state update failed")

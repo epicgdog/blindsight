@@ -43,7 +43,6 @@ SNAP_MAX_M = 8.0  # a position further than this from any walkable floor is left
 NODE_DETOUR_M = 12.0  # a route may start at a node this much further away to avoid crossing a hole
 GRID_PX = 2  # drawn routes are searched on the walkable mask at this pixel step
 BLOCKED_COST = 60.0  # cost of one grid cell that is not walkable (crossing a door line, never a hole)
-OBSTACLE_COST = 40.0  # cost of one grid cell inside a detected obstacle (passable when nothing else is)
 
 _UNITS = {"zero": 0, "oh": 0, "o": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
           "seven": 7, "eight": 8, "nine": 9}
@@ -125,7 +124,6 @@ class Venue:
         self._walk: dict[str, Any] = {}
         self._grids: dict[str, Any] = {}
         self._edge_paths: dict[tuple, list] = {}
-        self.obstacles: dict[str, list[tuple[float, float, float]]] = {}  # level -> [(u, v, radius px)]
         self.levels = {lv["id"]: lv for lv in data["levels"]}
         self.rooms = {r["id"]: r for r in data["rooms"]}
         self.align = align
@@ -346,12 +344,6 @@ class Venue:
         y0, y1 = max(0, min(sa[1], sb[1]) - pad), min(h - 1, max(sa[1], sb[1]) + pad)
         win = cost[y0:y1 + 1, x0:x1 + 1].tolist()
         W, H = x1 - x0 + 1, y1 - y0 + 1
-        for ou, ov, orad in self.obstacles.get(level, ()):  # detected objects: go around them
-            cu, cv, cr = ou / GRID_PX - x0, ov / GRID_PX - y0, orad / GRID_PX
-            for yy in range(max(0, int(cv - cr)), min(H, int(cv + cr) + 2)):
-                for xx in range(max(0, int(cu - cr)), min(W, int(cu + cr) + 2)):
-                    if (xx - cu) ** 2 + (yy - cv) ** 2 <= cr * cr:
-                        win[yy][xx] = max(win[yy][xx], OBSTACLE_COST)
         start, goal = (sa[0] - x0, sa[1] - y0), (sb[0] - x0, sb[1] - y0)
         steps = [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
                  (1, 1, 1.4142), (1, -1, 1.4142), (-1, 1, 1.4142), (-1, -1, 1.4142)]
@@ -398,18 +390,7 @@ class Venue:
             u, v = int(round(a[0] + (b[0] - a[0]) * t)), int(round(a[1] + (b[1] - a[1]) * t))
             if not (0 <= v < inner.shape[0] and 0 <= u < inner.shape[1] and inner[v, u]):
                 return False
-            if any((u - ou) ** 2 + (v - ov) ** 2 < orad * orad for ou, ov, orad in self.obstacles.get(level, ())):
-                return False
         return True
-
-    def set_obstacles(self, by_level: dict[str, list[tuple[float, float, float]]]) -> None:
-        """Detected objects to route around: level -> [(u, v, radius px)] (replaces the last set)."""
-        self.obstacles = {lv: list(v) for lv, v in by_level.items() if v}
-
-    def _near_obstacle(self, level: str, a, b, pad: float = 80.0) -> bool:
-        lo_u, hi_u = min(a[0], b[0]) - pad, max(a[0], b[0]) + pad
-        lo_v, hi_v = min(a[1], b[1]) - pad, max(a[1], b[1]) + pad
-        return any(lo_u - r <= u <= hi_u + r and lo_v - r <= v <= hi_v + r for u, v, r in self.obstacles.get(level, ()))
 
     def straighten(self, level: str, pts: list) -> list:
         """Fewest straight runs that stay on walkable floor: from each kept point, go as far along
@@ -433,8 +414,6 @@ class Venue:
         pts: list = [waypoints[0]]
         for k, (a, b) in enumerate(zip(waypoints, waypoints[1:])):
             key = (level, names[k], names[k + 1]) if names[k] and names[k + 1] else None
-            if key is not None and self._near_obstacle(level, a, b):
-                key = None  # an obstacle nearby: this hop is searched again, not taken from the cache
             if key is not None and key in self._edge_paths:
                 hop = self._edge_paths[key]
             else:

@@ -68,11 +68,3 @@ test("helpers", () => {
   near(wrap180(190), -170); near(wrap180(-190), 170); near(wrap180(45), 45);
   near(focalPx(800, 90), 400);
 });
-
-test("a detected obstacle ahead is drawn as a ring on the floor", () => {
-  const sc = arScene({ route: [[0, 0], [0, 8]], pos: [0, 0], headingDeg: 0, cam: CAM,
-    obstacles: [{ x: 0.6, y: 4, r_m: 0.4, cls: "chair" }, { x: 0, y: -3, r_m: 0.4, cls: "chair" }] });
-  assert.equal(sc.rings.length, 1, "the one behind is not drawn");
-  const mid = sc.rings[0].pts.reduce((a, p) => a + p[0], 0) / 16;
-  assert.ok(mid > 200, "right of the path");
-});
