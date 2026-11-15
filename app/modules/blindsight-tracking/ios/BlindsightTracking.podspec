@@ -5,9 +5,9 @@ Pod::Spec.new do |s|
   s.description = s.summary
   s.license = { :type => 'MIT' }
   s.author = 'Blindsight'
-  s.homepage = 'https://github.com/epicgdog/blindsight'
+  s.homepage = 'https://github.com/epicgdog/insight'
   s.platforms = { :ios => '16.0' }
-  s.source = { :git => 'https://github.com/epicgdog/blindsight.git' }
+  s.source = { :git => 'https://github.com/epicgdog/insight.git' }
   s.static_framework = true
   s.dependency 'ExpoModulesCore'
   s.frameworks = 'ARKit', 'CoreMotion', 'AVFoundation', 'Speech', 'Vision'

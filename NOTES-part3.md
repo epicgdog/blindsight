@@ -1,6 +1,6 @@
 # NOTES-part3: Matterport and localization
 
-Branch `part-3` (pull request epicgdog/blindsight#2). Commits are prefixed `part3:`.
+Branch `part-3` (pull request epicgdog/insight#2). Commits are prefixed `part3:`.
 
 ## Status, 2026-11-14
 
